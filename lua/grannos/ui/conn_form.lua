@@ -4,7 +4,9 @@
 -- value cell for text/secret fields, a dropdown directly below the row for
 -- choice fields — <C-s> submits, q/<Esc> cancels the whole form. Cancelling an
 -- individual field edit only returns focus to the form — it never discards the
--- rest of the form's state.
+-- rest of the form's state. A "Test Connection" button, when the caller
+-- supplies on_test, sits below the fields as one more navigable row: <CR>
+-- there runs the check and shows a green check or a red cross + error inline.
 local M = {}
 
 local hl     = require("grannos.hl")
@@ -16,13 +18,20 @@ local NS = vim.api.nvim_create_namespace("GrannosConnForm")
 local f = {}
 
 local HELP_KEYMAPS = {
-  { lhs = "j/<Down>", desc = "Next field",     group = "Navigate" },
-  { lhs = "k/<Up>",   desc = "Previous field", group = "Navigate" },
-  { lhs = "<CR>",     desc = "Edit field",     group = "Navigate" },
+  { lhs = "j/<Down>", desc = "Next field/button",     group = "Navigate" },
+  { lhs = "k/<Up>",   desc = "Previous field/button", group = "Navigate" },
+  { lhs = "<CR>",     desc = "Edit field, or run Test Connection", group = "Navigate" },
   { lhs = "<C-s>",    desc = "Save",           group = "" },
   { lhs = "q/<Esc>",  desc = "Cancel",         group = "" },
   { lhs = "g?",       desc = "Show this help", group = "" },
 }
+
+--- Number of cursor-navigable rows: one per field, plus the Test Connection
+--- button row when the caller supplied on_test.
+--- @return integer
+local function row_count()
+  return #f.fields + (f.on_test and 1 or 0)
+end
 
 --- Redraw the form buffer from the current field values/cursor/error state.
 local function render()
@@ -38,6 +47,24 @@ local function render()
     if field.is_valid and not field.is_valid() then line = line .. "  (required)" end
     lines[i] = line
   end
+
+  local button_row0, test_err_row = nil, nil
+  if f.on_test then
+    table.insert(lines, "")
+    button_row0 = #lines
+    local suffix = ""
+    if f.test_status == "testing" then suffix = "  testing…"
+    elseif f.test_status == "ok" then suffix = "  \xE2\x9C\x93"   -- ✓
+    elseif f.test_status == "error" then suffix = "  \xE2\x9C\x97" -- ✗
+    end
+    table.insert(lines, "  [ Test Connection ]" .. suffix)
+    if f.test_status == "error" and f.test_error then
+      table.insert(lines, "")
+      test_err_row = #lines
+      table.insert(lines, "  \xE2\x9C\x97 " .. f.test_error)
+    end
+  end
+
   table.insert(lines, "")
   local err_row = nil
   if f.error then
@@ -50,6 +77,9 @@ local function render()
   vim.bo[f.buf].modifiable = true
   vim.api.nvim_buf_set_lines(f.buf, 0, -1, false, lines)
   vim.bo[f.buf].modifiable = false
+  if f.win and vim.api.nvim_win_is_valid(f.win) then
+    pcall(vim.api.nvim_win_set_config, f.win, { height = math.min(#lines, vim.o.lines - 4) })
+  end
 
   vim.api.nvim_buf_clear_namespace(f.buf, NS, 0, -1)
   for i, field in ipairs(f.fields) do
@@ -57,14 +87,32 @@ local function render()
       vim.hl.range(f.buf, NS, "GrannosConnError", { i - 1, 0 }, { i - 1, -1 })
     end
   end
+  if button_row0 then
+    local button_hl = f.test_status == "ok" and "GrannosQuerySuccess"
+      or f.test_status == "error" and "GrannosConnError"
+      or nil
+    if button_hl then
+      vim.hl.range(f.buf, NS, button_hl, { button_row0, 0 }, { button_row0, -1 })
+    end
+  end
+  if test_err_row then
+    vim.hl.range(f.buf, NS, "GrannosConnError", { test_err_row, 0 }, { test_err_row, -1 })
+  end
   if err_row then
     vim.hl.range(f.buf, NS, "GrannosConnError", { err_row, 0 }, { err_row, -1 })
   end
-  if f.fields[f.cursor] then
-    vim.hl.range(f.buf, NS, "PmenuSel", { f.cursor - 1, 0 }, { f.cursor - 1, -1 })
+
+  local cursor_row0
+  if f.cursor <= #f.fields then
+    cursor_row0 = f.cursor - 1
+  else
+    cursor_row0 = button_row0
   end
-  if f.win and vim.api.nvim_win_is_valid(f.win) then
-    pcall(vim.api.nvim_win_set_cursor, f.win, { f.cursor, 0 })
+  if cursor_row0 then
+    vim.hl.range(f.buf, NS, "PmenuSel", { cursor_row0, 0 }, { cursor_row0, -1 })
+    if f.win and vim.api.nvim_win_is_valid(f.win) then
+      pcall(vim.api.nvim_win_set_cursor, f.win, { cursor_row0 + 1, 0 })
+    end
   end
 end
 
@@ -240,9 +288,38 @@ local function open_dropdown(field)
   })
 end
 
---- Activate the field currently under the cursor: open its dropdown (choice
---- fields) or its in-place text overlay (text/secret fields).
+--- Run the caller-supplied connectivity check (on_test) against the form's
+--- current, unsaved field values. Shows "testing…" while in flight, then a
+--- green check or a red cross + inline error message on completion. Guards
+--- against a stale/late callback landing on a form that has since closed or
+--- been reopened (module state `f` is shared and gets replaced by M.open).
+local function test_connection()
+  if not f.on_test or f.test_status == "testing" then return end
+  local this_form = f
+
+  local values = {}
+  for _, field in ipairs(f.fields) do values[field.key] = field.get() end
+
+  f.test_status = "testing"
+  f.test_error  = nil
+  render()
+
+  f.on_test(values, function(ok, err)
+    if f ~= this_form or not f.buf or not vim.api.nvim_buf_is_valid(f.buf) then return end
+    f.test_status = ok and "ok" or "error"
+    f.test_error  = err
+    render()
+  end)
+end
+
+--- Activate the row currently under the cursor: run Test Connection (button
+--- row), or open a field's dropdown (choice fields) / in-place text overlay
+--- (text/secret fields).
 local function activate()
+  if f.on_test and f.cursor > #f.fields then
+    test_connection()
+    return
+  end
   local field = f.fields[f.cursor]
   if not field then return end
   if field.kind == "choice" then
@@ -293,6 +370,8 @@ end
 ---              edit_prefill/commit_text for text/secret, options/commit_choice for choice)
 ---   .on_submit fun(values: table<string, any>, done: fun(err: string|nil))
 ---   .on_cancel fun()
+---   .on_test   fun(values: table<string, any>, done: fun(ok: boolean, err: string|nil))|nil
+---              when given, adds a "Test Connection" button below the fields.
 function M.open(opts)
   close()  -- only one form at a time
 
@@ -302,7 +381,7 @@ function M.open(opts)
   end
 
   local width  = math.min(math.max(60, label_w + 40), vim.o.columns - 4)
-  local height = #opts.fields + 3
+  local height = #opts.fields + 3 + (opts.on_test and 2 or 0)
 
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].bufhidden = "wipe"
@@ -321,15 +400,18 @@ function M.open(opts)
   vim.api.nvim_win_set_hl_ns(win, hl.NS_ID)
 
   f = {
-    buf       = buf,
-    win       = win,
-    fields    = opts.fields,
-    cursor    = 1,
-    label_w   = label_w,
-    width     = width,
-    error     = nil,
-    on_submit = opts.on_submit,
-    on_cancel = opts.on_cancel,
+    buf         = buf,
+    win         = win,
+    fields      = opts.fields,
+    cursor      = 1,
+    label_w     = label_w,
+    width       = width,
+    error       = nil,
+    on_submit   = opts.on_submit,
+    on_cancel   = opts.on_cancel,
+    on_test     = opts.on_test,
+    test_status = nil,
+    test_error  = nil,
   }
 
   render()
@@ -339,8 +421,8 @@ function M.open(opts)
   --- @param fn  fun()
   local function map(key, fn) vim.keymap.set("n", key, fn, { buffer = buf, nowait = true, silent = true }) end
 
-  local function nav_down() f.cursor = math.min(f.cursor + 1, #f.fields); render() end
-  local function nav_up()   f.cursor = math.max(f.cursor - 1, 1);         render() end
+  local function nav_down() f.cursor = math.min(f.cursor + 1, row_count()); render() end
+  local function nav_up()   f.cursor = math.max(f.cursor - 1, 1);           render() end
 
   map("j",      nav_down)
   map("<Down>", nav_down)

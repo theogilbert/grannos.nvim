@@ -417,6 +417,49 @@ local function make_password_fields(pw_param, had_value)
   return { pw_field, make_toggle_field("remember_password", "Remember password", false) }
 end
 
+--- Build the params table to send to the backend's `connect` method from the
+--- form's raw `values` (as gathered by conn_form, i.e. before they've been
+--- validated/persisted). Coerces integer fields and resolves the password the
+--- same way a submit would: an edited, non-empty password field wins, and an
+--- unedited one falls back to `current`'s already-stored password (nil for
+--- create, where an unedited/empty password just means "no password").
+--- @param dfields table[]     driver param descriptors (excludes the secret one)
+--- @param values  table       raw values gathered from the form
+--- @param current table|nil   existing connection params, for password fallback
+--- @return table
+local function build_connect_params(dfields, values, current)
+  local params = {}
+  for _, p in ipairs(dfields) do params[p.key] = values[p.key] end
+  coerce_integer_fields(dfields, params)
+
+  local pw_result = values.password or { edited = false, raw = "" }
+  local current_pw = current and current.password
+  if current_pw == vim.NIL then current_pw = nil end
+  local pw = (pw_result.edited and pw_result.raw ~= "") and pw_result.raw or current_pw
+  if pw and pw ~= "" then params.password = pw end
+  return params
+end
+
+--- Attempt to open, then immediately close, a connection on the backend using
+--- `driver` + `params` (never persisted to disk) — the "Test Connection"
+--- button's action. Calls `done(true, nil)` on success or `done(false, err)`
+--- with the backend's plain-string error on failure.
+--- @param driver string
+--- @param params table
+--- @param done   fun(ok: boolean, err: string|nil)
+local function test_connect(driver, params, done)
+  local client = require("grannos.client")
+  local server_params = vim.tbl_extend("force", { driver = driver }, params)
+  client.request("connect", server_params, function(err, result)
+    if err then
+      done(false, err)
+      return
+    end
+    client.request("disconnect", { connection_id = result.connection_id }, function() end)
+    done(true, nil)
+  end)
+end
+
 -- Maps protocol language identifiers (from the server's Language enum) to Vim
 -- filetypes.  This is the only place that knows about Vim-specific filetype names.
 local LANGUAGE_TO_FT = {
@@ -666,6 +709,9 @@ function M.create(caps, callback, defaults)
       title     = "New Connection",
       fields    = fields,
       on_cancel = function() callback(nil) end,
+      on_test   = function(values, done)
+        test_connect(driver, build_connect_params(dfields, values, nil), done)
+      end,
       on_submit = function(values, done)
         local name  = values.name
         local group = values.group
@@ -746,6 +792,9 @@ function M.edit(key, caps, callback)
     title     = "Edit Connection",
     fields    = fields,
     on_cancel = function() callback(nil) end,
+    on_test   = function(values, done)
+      test_connect(driver, build_connect_params(dfields, values, current), done)
+    end,
     on_submit = function(values, done)
       local new_name  = values.name
       local new_group = values.group
@@ -822,6 +871,9 @@ function M.clone(source_key, new_name, caps, callback)
     title     = "Clone Connection",
     fields    = fields,
     on_cancel = function() callback(nil) end,
+    on_test   = function(values, done)
+      test_connect(driver, build_connect_params(dfields, values, current), done)
+    end,
     on_submit = function(values, done)
       local name      = values.name
       local new_group = values.group

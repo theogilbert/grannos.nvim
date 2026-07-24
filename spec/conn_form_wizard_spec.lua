@@ -9,6 +9,20 @@ local stub = { last = nil }
 function stub.open(opts) stub.last = opts end
 package.loaded["grannos.ui.conn_form"] = stub
 
+--- Stub grannos.client: records every `connect`/`disconnect` request and lets
+--- the test script the backend's response via client_stub.reply_connect.
+local client_stub = { requests = {}, reply_connect = nil }
+function client_stub.request(method, params, callback)
+  table.insert(client_stub.requests, { method = method, params = params })
+  if method == "connect" then
+    local err, result = client_stub.reply_connect(params)
+    callback(err, result)
+  else
+    callback(nil, { ok = true })
+  end
+end
+package.loaded["grannos.client"] = client_stub
+
 local connections = require("grannos.connections")
 
 local CAPS = {
@@ -239,5 +253,74 @@ describe("connections.clone (form-based)", function()
     assert.equals(connections.conn_key("srv", "pg", "prod", "mydb-copy"), got_new_key)
     assert.is_not_nil(connections.get(key))          -- original untouched
     assert.is_not_nil(connections.get(got_new_key))  -- clone created
+  end)
+end)
+
+describe("Test Connection button (on_test)", function()
+  local tmp
+
+  before_each(function()
+    tmp = vim.fn.tempname() .. ".json"
+    config.setup({ connections_file = tmp })
+    connections.invalidate()
+    stub.last = nil
+    client_stub.requests = {}
+    client_stub.reply_connect = function() return nil, { connection_id = "0" } end
+  end)
+
+  after_each(function()
+    pcall(vim.fn.delete, tmp)
+  end)
+
+  it("connects then disconnects using the form's current unsaved values, driver at the top level", function()
+    connections.create(CAPS, function() end, { driver = "pg" })
+    find(stub.last.fields, "host").commit_text("localhost")
+    find(stub.last.fields, "password").commit_text("hunter2")
+
+    local ok, err
+    stub.last.on_test(gather(stub.last.fields), function(o, e) ok, err = o, e end)
+
+    assert.is_true(ok)
+    assert.is_nil(err)
+    assert.equals(2, #client_stub.requests)
+    assert.equals("connect", client_stub.requests[1].method)
+    assert.equals("pg", client_stub.requests[1].params.driver)
+    assert.equals("localhost", client_stub.requests[1].params.host)
+    assert.equals(5432, client_stub.requests[1].params.port)  -- integer default coerced
+    assert.equals("hunter2", client_stub.requests[1].params.password)
+    assert.equals("disconnect", client_stub.requests[2].method)
+    assert.equals("0", client_stub.requests[2].params.connection_id)
+
+    -- Testing must never write anything to disk.
+    assert.same({}, connections.load_all())
+  end)
+
+  it("reports the backend's error string on failure without disconnecting", function()
+    client_stub.reply_connect = function() return "connection refused", nil end
+    connections.create(CAPS, function() end, { driver = "pg" })
+    find(stub.last.fields, "host").commit_text("unreachable-host")
+
+    local ok, err
+    stub.last.on_test(gather(stub.last.fields), function(o, e) ok, err = o, e end)
+
+    assert.is_false(ok)
+    assert.equals("connection refused", err)
+    assert.equals(1, #client_stub.requests)  -- no disconnect attempted after a failed connect
+  end)
+
+  it("falls back to the connection's already-stored password when unedited (edit)", function()
+    connections.create(CAPS, function() end, { driver = "pg" })
+    find(stub.last.fields, "name").commit_text("mydb")
+    find(stub.last.fields, "host").commit_text("localhost")
+    find(stub.last.fields, "password").commit_text("hunter2")
+    find(stub.last.fields, "remember_password").commit_choice({ value = true })
+    submit(stub.last)
+
+    stub.last = nil
+    connections.edit(connections.conn_key("srv", "pg", "", "mydb"), CAPS, function() end)
+
+    client_stub.requests = {}
+    stub.last.on_test(gather(stub.last.fields), function() end)
+    assert.equals("hunter2", client_stub.requests[1].params.password)
   end)
 end)
