@@ -465,6 +465,7 @@ end
 local LANGUAGE_TO_FT = {
   sql    = "sql",
   cypher = "cypher",
+  promql = "promql",
 }
 
 --- Interactively pick a connection from `caps` and call `callback(key, params)`.
