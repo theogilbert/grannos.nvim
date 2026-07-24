@@ -13,6 +13,7 @@ local LOB_FG       = "#6B7280"
 local HELP_FG      = "#4B9CD3"
 local THOUSANDS_FG = "#767676"
 local SCROLLBAR_FG = "#888888"
+local EDIT_BG      = "#1F3D2B"  -- subtle green, echoing the common insert-mode statusline color
 
 local DIAGRAM_ROOT_TABLE_FG = "#DAA520" -- gold, reserved for a diagram's source/root table
 
@@ -99,6 +100,10 @@ local function setup_highlights()
   vim.api.nvim_set_hl(0, "GrannosExplorerConstraint",  { fg = "#E06C75",  default = true })
   vim.api.nvim_set_hl(0, "GrannosExplorerGroup",       { fg = "#848D9E",  default = true })
   vim.api.nvim_set_hl(0, "GrannosExplorerDim",         { fg = "#6B7691",  default = true })
+  -- Global (not NS_ID-scoped): applied via 'winhighlight' on windows that must
+  -- NOT be linked to NS_ID via nvim_win_set_hl_ns, since that takes precedence
+  -- over 'winhighlight' and would silently defeat it.
+  vim.api.nvim_set_hl(0, "GrannosConnFormEdit",        { bg = EDIT_BG,    default = true })
 end
 
 --- Initialize namespaces, define highlights, and register a ColorScheme autocmd.

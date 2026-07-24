@@ -266,21 +266,6 @@ local function coerce_integer_fields(fields, values)
   end
 end
 
---- Copy driver fields and pre-populate `.default` from an existing connection's values.
---- @param fields  table[]  field descriptors
---- @param current table    existing params
---- @return table[]  new field descriptor array with `.default` filled in
-local function fields_with_defaults(fields, current)
-  local out = {}
-  for _, p in ipairs(fields) do
-    local f = vim.tbl_extend("force", {}, p)
-    local cur = current[p.key]
-    if cur ~= nil and cur ~= vim.NIL then f.default = tostring(cur) end
-    table.insert(out, f)
-  end
-  return out
-end
-
 --- Return the human-readable label for `driver`, preferring capabilities over the stored file.
 --- @param caps   table
 --- @param server string
@@ -293,125 +278,143 @@ local function resolve_driver_label(caps, server, driver)
   return (M.load(server)[driver] or {}).label or driver
 end
 
---- Prompt for a password and optionally ask whether to remember it.
---- `prompt_suffix` is appended to `pw_param.label` for the input prompt.
---- `pw_if_empty` is passed to `finish_fn` when the user enters an empty string:
----   nil → edit/clone: empty means "keep current password", no confirmation needed.
----   ""  → create: empty means "no password"; confirm to guard against silent paste failures.
---- `finish_fn(pw, remember)` is called on success; `cancel_fn()` on any cancel.
---- @param pw_param      table|nil
---- @param prompt_suffix string
---- @param pw_if_empty   string|nil
---- @param finish_fn     fun(pw: string|nil, remember: boolean)
---- @param cancel_fn     fun()
-local function prompt_password_and_remember(pw_param, prompt_suffix, pw_if_empty, finish_fn, cancel_fn)
-  if not pw_param then finish_fn(nil, false) return end
-  vim.ui.input({ prompt = pw_param.label .. prompt_suffix, secret = true }, function(pw)
-    if pw == nil then cancel_fn() return end
-    if pw == "" then
-      if pw_if_empty ~= nil then
-        -- Secret fields mask input, so a failed paste looks identical to an empty field.
-        -- Ask the user to confirm rather than silently saving without a password.
-        vim.schedule(function()
-          vim.ui.select({ "Re-enter password", "Connect without a password" }, {
-            prompt = "No password entered:",
-          }, function(ch)
-            if ch == nil or ch == "Re-enter password" then
-              vim.schedule(function()
-                prompt_password_and_remember(pw_param, prompt_suffix, pw_if_empty, finish_fn, cancel_fn)
-              end)
-            else
-              finish_fn(pw_if_empty, false)
-            end
-          end)
-        end)
-      else
-        finish_fn(pw_if_empty, false)
+--- Build the "Connection name" ConnFormField (see ui/conn_form.lua for the field shape).
+--- @param initial string|nil
+--- @return table
+local function make_name_field(initial)
+  local raw = initial or ""
+  return {
+    key          = "name",
+    label        = "Connection name",
+    kind         = "text",
+    get          = function() return raw end,
+    display      = function() return raw ~= "" and raw or "(none)" end,
+    edit_prefill = function() return raw end,
+    commit_text  = function(v) raw = v end,
+    is_valid     = function() return raw ~= "" end,
+  }
+end
+
+--- Build the "Group" ConnFormField: a choice field over existing groups for
+--- (server, driver), plus "[No group]" and a "[+ New group]" escape hatch that
+--- switches into free-text entry (mirrors the old pick_group wizard step).
+--- @param server  string
+--- @param driver  string
+--- @param initial string|nil
+--- @return table
+local function make_group_field(server, driver, initial)
+  local raw = initial or ""
+  return {
+    key     = "group",
+    label   = "Group",
+    kind    = "choice",
+    get     = function() return raw end,
+    display = function() return raw ~= "" and raw or "[No group]" end,
+    options = function()
+      local driver_data = M.load(server)[driver] or {}
+      local existing = {}
+      for gname in pairs(driver_data.groups or {}) do
+        if gname ~= "" then table.insert(existing, gname) end
       end
-      return
-    end
-    vim.schedule(function()
-      vim.ui.select({ "No", "Yes" }, { prompt = "Remember password?" }, function(ch)
-        if ch == nil then cancel_fn() return end
-        finish_fn(pw, ch == "Yes")
-      end)
-    end)
-  end)
+      table.sort(existing)
+      local items = { { value = "", label = "[No group]" } }
+      for _, gname in ipairs(existing) do table.insert(items, { value = gname, label = gname }) end
+      table.insert(items, { is_new = true, label = "[+ New group]" })
+      return items
+    end,
+    commit_choice = function(item) raw = item.value end,
+    commit_text   = function(v) if v and v ~= "" then raw = v end end,
+  }
 end
 
---- Walk through `fields` sequentially via `vim.ui.input`/`vim.ui.select`,
---- collecting values into a table, then call `done(results)`.
---- Calls `done(nil)` if the user cancels any step.
---- @param fields table[]           field descriptors from capabilities
---- @param done   fun(results: table|nil)
-local function prompt_sequence(fields, done)
-  local results = {}
-  local function step(i, err_prefix)
-    if i > #fields then done(results) return end
-    local f       = fields[i]
-    local choices = type(f.choices) == "table" and f.choices or nil
-    local label   = jval(f.label, "")
-    local prompt  = err_prefix and (err_prefix .. label) or label
-    local default = jval(f.default)
-    if choices then
-      vim.ui.select(choices, {
-        prompt      = prompt,
-        format_item = function(c) return type(c) == "table" and (c.label or c.value) or c end,
-      }, function(val)
-        if val == nil then done(nil) return end
-        results[f.key] = type(val) == "table" and val.value or val
-        vim.schedule(function() step(i + 1) end)
-      end)
-    else
-      vim.ui.input({ prompt = prompt, default = default ~= nil and tostring(default) or "" }, function(val)
-        if val == nil then done(nil) return end
-        if val == "" and jval(f.required, false) then
-          vim.schedule(function() step(i, "[required] ") end)
-          return
-        end
-        results[f.key] = (val ~= "" and val) or default or ""
-        vim.schedule(function() step(i + 1) end)
-      end)
+--- Build a ConnFormField for one driver-specific DriverParam, pre-filled from
+--- `current` (existing params, for edit/clone) or `p.default` (create).
+--- @param p       table     DriverParam descriptor (key/type/label/required/default/choices)
+--- @param current table|nil existing param values; nil for create
+--- @return table
+local function driver_param_field(p, current)
+  local initial = current and current[p.key]
+  if initial == nil or initial == vim.NIL then initial = jval(p.default) end
+  local raw      = initial ~= nil and tostring(initial) or ""
+  local required = jval(p.required, false)
+
+  local field = {
+    key      = p.key,
+    label    = p.label,
+    kind     = (p.type == "enum") and "choice" or "text",
+    required = required,
+    get      = function() return raw end,
+    is_valid = function() return not required or raw ~= "" end,
+  }
+
+  if field.kind == "choice" then
+    field.display = function()
+      for _, c in ipairs(p.choices or {}) do
+        if c.value == raw then return c.label or c.value end
+      end
+      return raw ~= "" and raw or "(none)"
     end
+    field.options = function()
+      local items = {}
+      for _, c in ipairs(p.choices or {}) do
+        table.insert(items, { value = c.value, label = c.label or c.value })
+      end
+      return items
+    end
+    field.commit_choice = function(item) raw = item.value end
+  else
+    field.display      = function() return raw ~= "" and raw or "(none)" end
+    field.edit_prefill  = function() return raw end
+    field.commit_text   = function(v) raw = v end
   end
-  step(1)
+  return field
 end
 
---- Present a group picker for (server, driver).
---- Calls `callback("")` for no group, `callback(name)` for a named group, `callback(nil)` on cancel.
---- @param server   string
---- @param driver   string
---- @param callback fun(group: string|nil)
-local function pick_group(server, driver, callback)
-  local driver_data = (M.load(server)[driver] or {})
-  local existing    = {}
-  for gname in pairs(driver_data.groups or {}) do
-    if gname ~= "" then table.insert(existing, gname) end
-  end
-  table.sort(existing)
+--- Build a Yes/No ConnFormField.
+--- @param key     string
+--- @param label   string
+--- @param initial boolean
+--- @return table
+local function make_toggle_field(key, label, initial)
+  local value = initial and true or false
+  return {
+    key     = key,
+    label   = label,
+    kind    = "choice",
+    get     = function() return value end,
+    display = function() return value and "Yes" or "No" end,
+    options = function() return { { value = false, label = "No" }, { value = true, label = "Yes" } } end,
+    commit_choice = function(item) value = item.value end,
+  }
+end
 
-  local items = { { type = "none", label = "[No group]" } }
-  for _, gname in ipairs(existing) do
-    table.insert(items, { type = "group", label = gname })
-  end
-  table.insert(items, { type = "new", label = "[+ New group]" })
-
-  vim.ui.select(items, {
-    prompt      = "Group:",
-    format_item = function(item) return item.label end,
-  }, function(choice)
-    if not choice then callback(nil) return end
-    if choice.type == "none" then
-      callback("")
-    elseif choice.type == "group" then
-      callback(choice.label)
-    else
-      vim.ui.input({ prompt = "Group name: " }, function(gname)
-        if not gname or gname == "" then callback(nil) return end
-        callback(gname)
-      end)
-    end
-  end)
+--- Build the password (+ "Remember password") ConnFormFields for `pw_param`.
+--- `had_value` seeds the unedited display: for create this is always false
+--- ("(not set)"); for edit/clone it reflects whether the connection already
+--- has a password or a `requires_password` flag ("(unchanged)").
+--- Leaving the field unedited always means "keep whatever is already there"
+--- (or "no password", for create) — mirrors the old prompt_password_and_remember
+--- semantics, minus its "confirm empty password" dialog: the form shows the
+--- set/not-set state persistently, so a failed paste is immediately visible.
+--- @param pw_param  table|nil
+--- @param had_value boolean
+--- @return table[]  empty when there is no secret param for this driver
+local function make_password_fields(pw_param, had_value)
+  if not pw_param then return {} end
+  local raw, edited = "", false
+  local pw_field = {
+    key          = "password",
+    label        = pw_param.label,
+    kind         = "secret",
+    get          = function() return { edited = edited and raw ~= "", raw = raw } end,
+    display      = function()
+      if edited and raw ~= "" then return "(set)" end
+      return had_value and "(unchanged)" or "(not set)"
+    end,
+    edit_prefill = function() return "" end,
+    commit_text  = function(v) raw = v or ""; edited = true end,
+  }
+  return { pw_field, make_toggle_field("remember_password", "Remember password", false) }
 end
 
 -- Maps protocol language identifiers (from the server's Language enum) to Vim
@@ -638,84 +641,65 @@ function M.pick(caps, active_set, filetype, callback)
   end)
 end
 
---- Interactively create a new connection via a wizard, save it, and call `callback(key, params)`.
+--- Interactively create a new connection via a single form, save it, and call `callback(key, params)`.
 --- Calls `callback(nil)` on cancel.
 --- @param caps     table
 --- @param callback fun(key: string|nil, params: table|nil)
---- @param defaults table|nil  { driver: string|nil, group: string|nil }  skip the driver and/or
----                            group picker steps when the caller already knows them.
----                            `group = ""` means "no group"; `group = nil` means "prompt for it".
+--- @param defaults table|nil  { driver: string|nil, group: string|nil }  skip the driver picker
+---                            and/or pre-fill the group field when the caller already knows them.
 function M.create(caps, callback, defaults)
   caps = caps or { server = "", drivers = {} }
   local server = caps.server or ""
   defaults = defaults or {}
 
-  --- Continue the wizard once the driver is known: prompt for name, then group, then fields.
+  --- Open the form once the driver is known.
   --- @param driver       string
   --- @param driver_label string
   local function with_driver(driver, driver_label)
-    vim.ui.input({ prompt = "Connection name: " }, function(name)
-      if not name or name == "" then
-        if name ~= nil then vim.notify("grannos: connection name is required", vim.log.levels.WARN) end
-        callback(nil) return
-      end
+    local dfields, pw_param = driver_fields(caps, driver)
 
-      --- Continue the wizard once the group is known.
-      --- @param group string
-      local function with_group(group)
+    local fields = { make_name_field(nil), make_group_field(server, driver, defaults.group) }
+    for _, p in ipairs(dfields) do table.insert(fields, driver_param_field(p, nil)) end
+    vim.list_extend(fields, make_password_fields(pw_param, false))
+
+    require("grannos.ui.conn_form").open({
+      title     = "New Connection",
+      fields    = fields,
+      on_cancel = function() callback(nil) end,
+      on_submit = function(values, done)
+        local name  = values.name
+        local group = values.group
         local existing = ((M.load(server)[driver] or {}).groups or {})[group] or {}
         if existing[name] then
-          vim.notify(("grannos: %q already exists in this group"):format(name), vim.log.levels.ERROR)
-          callback(nil)
+          done(("%q already exists in this group"):format(name))
           return
         end
 
-        vim.schedule(function()
-          local fields, pw_param = driver_fields(caps, driver)
+        local params = { requires_password = false }
+        for _, p in ipairs(dfields) do params[p.key] = values[p.key] end
+        coerce_integer_fields(dfields, params)
 
-          prompt_sequence(fields, function(values)
-            if not values then callback(nil) return end
-            coerce_integer_fields(fields, values)
+        local pw_result = values.password or { edited = false, raw = "" }
+        local pw = (pw_result.edited and pw_result.raw ~= "") and pw_result.raw or nil
+        if pw and values.remember_password then
+          params.password          = pw
+          params.requires_password = false
+        else
+          params.requires_password = pw ~= nil and pw ~= ""
+        end
 
-            local params = vim.tbl_extend("force", values, { requires_password = false })
-            local key    = M.conn_key(server, driver, group, name)
-
-            --- Finalise the connection record and write it to disk.
-            --- @param pw      string|nil  plaintext password (nil = no password)
-            --- @param remember boolean
-            local function finish(pw, remember)
-              if remember then
-                params.password          = pw
-                params.requires_password = false
-              else
-                params.requires_password = pw ~= nil and pw ~= ""
-              end
-              local data2 = read_data()
-              if not data2 then return end
-              upsert(data2, server, driver, driver_label, group, name, params)
-              write_data(data2)
-              vim.notify(("grannos: saved %q"):format(name), vim.log.levels.INFO)
-              local out = (pw ~= nil and pw ~= "")
-                and vim.tbl_extend("force", params, { password = pw }) or params
-              callback(key, out)
-            end
-
-            prompt_password_and_remember(pw_param, ": ", "", finish, function() callback(nil) end)
-          end)
-        end)
-      end
-
-      if defaults.group ~= nil then
-        with_group(defaults.group)
-      else
-        vim.schedule(function()
-          pick_group(server, driver, function(group)
-            if group == nil then callback(nil) return end
-            with_group(group)
-          end)
-        end)
-      end
-    end)
+        local key   = M.conn_key(server, driver, group, name)
+        local data2 = read_data()
+        if not data2 then done("failed to read the connections file"); return end
+        upsert(data2, server, driver, driver_label, group, name, params)
+        write_data(data2)
+        vim.notify(("grannos: saved %q"):format(name), vim.log.levels.INFO)
+        local out = (pw ~= nil and pw ~= "")
+          and vim.tbl_extend("force", params, { password = pw }) or params
+        done(nil)
+        callback(key, out)
+      end,
+    })
   end
 
   if defaults.driver then
@@ -734,7 +718,7 @@ function M.create(caps, callback, defaults)
   end)
 end
 
---- Interactively edit an existing connection and call `callback(new_key, params)`.
+--- Interactively edit an existing connection via a single form and call `callback(new_key, params)`.
 --- Calls `callback(nil)` on cancel or error.
 --- @param key      string
 --- @param caps     table
@@ -749,92 +733,76 @@ function M.edit(key, caps, callback)
     return
   end
 
-  vim.ui.input({ prompt = "Connection name: ", default = name }, function(new_name)
-    if not new_name or new_name == "" then
-      if new_name ~= nil then vim.notify("grannos: connection name is required", vim.log.levels.WARN) end
-      callback(nil) return
-    end
-    vim.schedule(function()
-      vim.ui.input({ prompt = "Group (empty = no group): ", default = group }, function(new_group)
-        if new_group == nil then callback(nil) return end
-        local new_key = M.conn_key(server, driver, new_group, new_name)
+  local driver_label  = resolve_driver_label(caps, server, driver)
+  local dfields, pw_param = driver_fields(caps, driver)
+  local had_password  = (current.password ~= nil and current.password ~= vim.NIL) or current.requires_password
 
-        if new_key ~= key and M.get(new_key) then
-          vim.notify(("grannos: %q already exists in this group"):format(new_name), vim.log.levels.ERROR)
-          callback(nil)
-          return
+  local fields = { make_name_field(name), make_group_field(server, driver, group) }
+  for _, p in ipairs(dfields) do table.insert(fields, driver_param_field(p, current)) end
+  vim.list_extend(fields, make_password_fields(pw_param, had_password))
+  table.insert(fields, make_toggle_field("allow_writes", "Always allow write operations", current.allow_writes))
+
+  require("grannos.ui.conn_form").open({
+    title     = "Edit Connection",
+    fields    = fields,
+    on_cancel = function() callback(nil) end,
+    on_submit = function(values, done)
+      local new_name  = values.name
+      local new_group = values.group
+      local new_key   = M.conn_key(server, driver, new_group, new_name)
+      if new_key ~= key and M.get(new_key) then
+        done(("%q already exists in this group"):format(new_name))
+        return
+      end
+
+      local params = { requires_password = current.requires_password or false }
+      for _, p in ipairs(dfields) do params[p.key] = values[p.key] end
+      coerce_integer_fields(dfields, params)
+      params.allow_writes = values.allow_writes and true or nil
+
+      local pw_result = values.password or { edited = false, raw = "" }
+      local pw = (pw_result.edited and pw_result.raw ~= "") and pw_result.raw or nil
+      if pw then
+        if values.remember_password then
+          params.password = pw; params.requires_password = false
+        else
+          params.requires_password = true
         end
+      else
+        if current.password then
+          params.password = current.password; params.requires_password = false
+        else
+          params.requires_password = current.requires_password
+        end
+        pw = current.password
+      end
 
-        vim.schedule(function()
-          local fields, pw_param = driver_fields(caps, driver)
-          local fields_pre       = fields_with_defaults(fields, current)
-
-          prompt_sequence(fields_pre, function(values)
-            if not values then callback(nil) return end
-            coerce_integer_fields(fields_pre, values)
-
-            local driver_label = resolve_driver_label(caps, server, driver)
-
-            local params = vim.tbl_extend("force", values, {
-              requires_password = current.requires_password or false,
-            })
-
-            --- Apply the password decision and write the updated record.
-            --- @param pw      string|nil
-            --- @param remember boolean
-            local function finish(pw, remember)
-              if pw ~= nil and pw ~= "" then
-                if remember then
-                  params.password = pw; params.requires_password = false
-                else
-                  params.requires_password = true
-                end
-              else
-                if current.password then
-                  params.password = current.password; params.requires_password = false
-                else
-                  params.requires_password = current.requires_password
-                end
-                pw = current.password
-              end
-              local data2 = read_data()
-              if not data2 then return end
-              if new_key ~= key then
-                local og = (((data2[server] or {})[driver] or {}).groups or {})[group]
-                if og then og[name] = nil end
-              end
-              upsert(data2, server, driver, driver_label, new_group, new_name, params)
-              write_data(data2)
-              vim.notify(("grannos: saved %q"):format(new_name), vim.log.levels.INFO)
-              local final = (pw ~= nil and pw ~= "")
-                and vim.tbl_extend("force", params, { password = pw }) or params
-              callback(new_key, final)
-            end
-
-            local allow_items = current.allow_writes and { "Yes", "No" } or { "No", "Yes" }
-            vim.ui.select(allow_items, { prompt = "Always allow write operations:" }, function(choice)
-              if choice == nil then callback(nil) return end
-              params.allow_writes = (choice == "Yes") and true or nil
-              vim.schedule(function()
-                prompt_password_and_remember(pw_param, " (empty = keep current): ", nil, finish, function() callback(nil) end)
-              end)
-            end)
-          end)
-        end)
-      end)
-    end)
-  end)
+      local data2 = read_data()
+      if not data2 then done("failed to read the connections file"); return end
+      if new_key ~= key then
+        local og = (((data2[server] or {})[driver] or {}).groups or {})[group]
+        if og then og[name] = nil end
+      end
+      upsert(data2, server, driver, driver_label, new_group, new_name, params)
+      write_data(data2)
+      vim.notify(("grannos: saved %q"):format(new_name), vim.log.levels.INFO)
+      local final = (pw ~= nil and pw ~= "")
+        and vim.tbl_extend("force", params, { password = pw }) or params
+      done(nil)
+      callback(new_key, final)
+    end,
+  })
 end
 
---- Clone `source_key` under `new_name`, prompting for group and driver fields.
---- Calls `callback(new_key, params)` on success, `callback(nil)` on cancel.
+--- Clone `source_key` under `new_name` via a single form and call `callback(new_key, params)`.
+--- Calls `callback(nil)` on cancel.
 --- @param source_key string
 --- @param new_name   string
 --- @param caps       table
 --- @param callback   fun(new_key: string|nil, params: table|nil)
 function M.clone(source_key, new_name, caps, callback)
   caps = caps or { server = "", drivers = {} }
-  local server, driver = M.conn_parts(source_key)
+  local server, driver, group = M.conn_parts(source_key)
   local current = M.get(source_key)
   if not current then
     vim.notify(("grannos: connection %q not found"):format(M.conn_display_name(source_key)), vim.log.levels.ERROR)
@@ -842,66 +810,63 @@ function M.clone(source_key, new_name, caps, callback)
     return
   end
 
-  vim.schedule(function()
-    pick_group(server, driver, function(group)
-      if group == nil then callback(nil) return end
+  local driver_label  = resolve_driver_label(caps, server, driver)
+  local dfields, pw_param = driver_fields(caps, driver)
+  local had_password  = (current.password ~= nil and current.password ~= vim.NIL) or current.requires_password
 
-      local new_key  = M.conn_key(server, driver, group, new_name)
-      local existing = ((M.load(server)[driver] or {}).groups or {})[group] or {}
-      if existing[new_name] then
-        vim.notify(("grannos: %q already exists in this group"):format(new_name), vim.log.levels.ERROR)
-        callback(nil)
+  local fields = { make_name_field(new_name), make_group_field(server, driver, group) }
+  for _, p in ipairs(dfields) do table.insert(fields, driver_param_field(p, current)) end
+  vim.list_extend(fields, make_password_fields(pw_param, had_password))
+
+  require("grannos.ui.conn_form").open({
+    title     = "Clone Connection",
+    fields    = fields,
+    on_cancel = function() callback(nil) end,
+    on_submit = function(values, done)
+      local name      = values.name
+      local new_group = values.group
+      local new_key   = M.conn_key(server, driver, new_group, name)
+      local existing  = ((M.load(server)[driver] or {}).groups or {})[new_group] or {}
+      if existing[name] then
+        done(("%q already exists in this group"):format(name))
         return
       end
 
-      vim.schedule(function()
-        local fields, pw_param = driver_fields(caps, driver)
-        local fields_pre       = fields_with_defaults(fields, current)
+      local params = {
+        requires_password = current.requires_password or false,
+        allow_writes       = current.allow_writes,
+      }
+      for _, p in ipairs(dfields) do params[p.key] = values[p.key] end
+      coerce_integer_fields(dfields, params)
 
-        prompt_sequence(fields_pre, function(values)
-          if not values then callback(nil) return end
-          coerce_integer_fields(fields_pre, values)
+      local pw_result = values.password or { edited = false, raw = "" }
+      local pw = (pw_result.edited and pw_result.raw ~= "") and pw_result.raw or nil
+      if pw then
+        if values.remember_password then
+          params.password = pw; params.requires_password = false
+        else
+          params.requires_password = true
+        end
+      else
+        if current.password then
+          params.password = current.password; params.requires_password = false
+        else
+          params.requires_password = current.requires_password
+        end
+        pw = current.password
+      end
 
-          local driver_label = resolve_driver_label(caps, server, driver)
-
-          local params = vim.tbl_extend("force", values, {
-            requires_password = current.requires_password or false,
-            allow_writes      = current.allow_writes,
-          })
-
-          --- Apply the password decision and write the cloned record.
-          --- @param pw      string|nil
-          --- @param remember boolean
-          local function finish(pw, remember)
-            if pw ~= nil and pw ~= "" then
-              if remember then
-                params.password = pw; params.requires_password = false
-              else
-                params.requires_password = true
-              end
-            else
-              if current.password then
-                params.password = current.password; params.requires_password = false
-              else
-                params.requires_password = current.requires_password
-              end
-              pw = current.password
-            end
-            local data2 = read_data()
-            if not data2 then return end
-            upsert(data2, server, driver, driver_label, group, new_name, params)
-            write_data(data2)
-            vim.notify(("grannos: saved %q"):format(new_name), vim.log.levels.INFO)
-            local final = (pw ~= nil and pw ~= "")
-              and vim.tbl_extend("force", params, { password = pw }) or params
-            callback(new_key, final)
-          end
-
-          prompt_password_and_remember(pw_param, " (empty = keep current): ", nil, finish, function() callback(nil) end)
-        end)
-      end)
-    end)
-  end)
+      local data2 = read_data()
+      if not data2 then done("failed to read the connections file"); return end
+      upsert(data2, server, driver, driver_label, new_group, name, params)
+      write_data(data2)
+      vim.notify(("grannos: saved %q"):format(name), vim.log.levels.INFO)
+      local final = (pw ~= nil and pw ~= "")
+        and vim.tbl_extend("force", params, { password = pw }) or params
+      done(nil)
+      callback(new_key, final)
+    end,
+  })
 end
 
 return M
