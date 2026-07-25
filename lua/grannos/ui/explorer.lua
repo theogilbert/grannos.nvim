@@ -6,6 +6,7 @@ local Buffer  = require("grannos.buffer")
 local client  = require("grannos.client")
 local config  = require("grannos.config")
 local hl      = require("grannos.hl")
+local pane    = require("grannos.ui.detail_pane")
 local results = require("grannos.ui.results")
 local window  = require("grannos.ui.window")
 local Spinner = require("grannos.ui.spinner")
@@ -34,6 +35,7 @@ local EXPLORER_HL = {
   index          = "GrannosExplorerIndex",
   constraint     = "GrannosExplorerConstraint",
   group          = "GrannosExplorerGroup",
+  document       = "GrannosExplorerDocument",
 }
 
 local TYPE_ICONS = {
@@ -45,6 +47,7 @@ local TYPE_ICONS = {
   collection     = "󱃗 ",
   index          = "󰒻 ",
   constraint     = "󰌾 ",
+  document       = "󰈙 ",
 }
 local GROUP_ICON = { closed = " ", open = " " }
 local FIELD_ICON = "󰠵 "
@@ -349,8 +352,8 @@ render_describe = function(details, node)
   add_hl("GrannosHeaderRow", 0, 2, 2 + #hdr_title)
 
   if not is_nil_val(details.comment) and details.comment ~= "" then
-    for _, cline in ipairs(vim.split(details.comment, "\n", { plain = true })) do
-      local comment_line = "  " .. cline:gsub("\r$", "")
+    for _, cline in ipairs(pane.wrap_lines(details.comment, pane.COMMENT_WRAP_WIDTH)) do
+      local comment_line = "  " .. cline
       table.insert(lines, comment_line)
       add_hl("GrannosExplorerDim", #lines - 1, 0, #comment_line)
     end
@@ -650,6 +653,8 @@ local function on_describe()
         require("grannos.ui.indices").open_single(details)
       elseif details and details.type == "field" then
         require("grannos.ui.column").open_single(details)
+      elseif details and details.type == "document" then
+        require("grannos.ui.document").open_single(details, node.name)
       else
         open_describe_float(details, node)
       end

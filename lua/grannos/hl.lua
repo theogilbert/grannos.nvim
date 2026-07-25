@@ -98,6 +98,7 @@ local function setup_highlights()
   vim.api.nvim_set_hl(0, "GrannosExplorerCollection",  { fg = "#4EC9B0",  default = true })
   vim.api.nvim_set_hl(0, "GrannosExplorerIndex",       { fg = "#56B6C2",  default = true })
   vim.api.nvim_set_hl(0, "GrannosExplorerConstraint",  { fg = "#E06C75",  default = true })
+  vim.api.nvim_set_hl(0, "GrannosExplorerDocument",    { fg = "#D19A66",  default = true })
   vim.api.nvim_set_hl(0, "GrannosExplorerGroup",       { fg = "#848D9E",  default = true })
   vim.api.nvim_set_hl(0, "GrannosExplorerDim",         { fg = "#6B7691",  default = true })
   -- Global (not NS_ID-scoped): applied via 'winhighlight' on windows that must

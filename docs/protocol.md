@@ -289,7 +289,7 @@ Returns detailed metadata about a specific node.
 
 | Field     | Type                       | Description                    |
 |-----------|----------------------------|---------------------------------|
-| `details` | object, array, or null     | Description, or null if the path does not resolve to a describable node. A path that names a *group* of items (currently only an indexes group, e.g. `["public", "users", "indexes"]`) returns a bare array of the singular type instead of a wrapper object. Discriminate a single object on its `type` field: `"entity"` → [EntityDescription](#entitydescription), `"field"` → [FieldDescription](#fielddescription), `"index"` → [IndexDescription](#indexdescription), `"relationship"` → [TableReference](#tablereference). An array is always `array of [IndexDescription](#indexdescription)`. |
+| `details` | object, array, or null     | Description, or null if the path does not resolve to a describable node. A path that names a *group* of items (currently only an indexes group, e.g. `["public", "users", "indexes"]`) returns a bare array of the singular type instead of a wrapper object. Discriminate a single object on its `type` field: `"entity"` → [EntityDescription](#entitydescription), `"field"` → [FieldDescription](#fielddescription), `"index"` → [IndexDescription](#indexdescription), `"relationship"` → [TableReference](#tablereference), `"document"` → [RawDocument](#rawdocument). An array is always `array of [IndexDescription](#indexdescription)`. |
 
 A field's own detail — samples, comments, index membership, FK references — is already embedded in its parent [EntityDescription](#entitydescription)'s `properties`; describing `[..., "columns", field_name]` (or the equivalent per-driver field-group segment) re-fetches that same field standalone, e.g. to refresh a single field without re-describing the whole entity. There is no group-level "list all fields" path — that's redundant with the parent entity's own `properties`.
 
@@ -571,6 +571,22 @@ Full metadata for a single field (column, property, …) — either embedded in 
 | `sample`               | array                                          | Up to 3 distinct non-null representative values sampled from the field   |
 | `outgoing_references`  | array of [TableReference](#tablereference)     | Foreign keys defined on this field that reference another entity. Empty if this field is not a foreign key. A field can carry more than one entry — either because it participates in more than one single-column FK constraint (each naming a different target), or because it is one leg of multiple composite FK constraints. |
 | `incoming_references`  | array of [TableReference](#tablereference)     | Foreign keys on other entities that reference this field. Empty if nothing references this field. |
+
+---
+
+## RawDocument
+
+Returned as `details` by `explore.describe` for a node whose natural representation is a single opaque text document rather than tabular metadata — e.g. a driver's running configuration file.
+
+| Field      | Type   | Description                                                              |
+|------------|--------|---------------------------------------------------------------------------|
+| `type`     | string | Always `"document"` — use to discriminate description types              |
+| `filetype` | string | Content's format, as a lowercase language/filetype hint (e.g. `"yaml"`, `"json"`, `"ini"`). Free-form, not a fixed enum — drivers surface whatever format their backend natively produces. Clients can use it to pick a syntax highlighter. |
+| `content`  | string | The document's full text content                                         |
+
+```json
+{"type": "document", "filetype": "yaml", "content": "global:\n  scrape_interval: 15s\n"}
+```
 
 ---
 
