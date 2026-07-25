@@ -489,6 +489,7 @@ String enum of standard query-language identifiers used in `Driver.languages`:
 |------------|-------------------------|
 | `"sql"`    | Structured Query Language (SQL) |
 | `"cypher"` | Cypher graph query language (Neo4j) |
+| `"promql"` | Prometheus Query Language (PromQL) |
 
 Mapping these to editor-specific concepts (e.g. Vim filetypes) is the client's responsibility.
 
