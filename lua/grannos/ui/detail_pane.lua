@@ -30,6 +30,39 @@ local NS         = vim.api.nvim_create_namespace("GrannosDetailPane")
 --- @return boolean
 function M.is_nil(v) return v == nil or v == vim.NIL end
 
+--- Default word-wrap width for free-text (comments) shown in a detail float,
+--- so a long single-line database comment doesn't force the window as wide
+--- as the text itself.
+M.COMMENT_WRAP_WIDTH = 78
+
+--- Word-wrap `text` to `width` display columns, preserving existing line
+--- breaks (e.g. a comment stored as multiple paragraphs).
+--- @param text  string
+--- @param width integer  max display width per wrapped line
+--- @return string[]
+function M.wrap_lines(text, width)
+  local out = {}
+  for _, para in ipairs(vim.split(tostring(text), "\n", { plain = true })) do
+    para = para:gsub("\r$", "")
+    if para == "" then
+      out[#out + 1] = ""
+    else
+      local line = ""
+      for word in para:gmatch("%S+") do
+        local candidate = line == "" and word or (line .. " " .. word)
+        if line ~= "" and vim.fn.strdisplaywidth(candidate) > width then
+          out[#out + 1] = line
+          line = word
+        else
+          line = candidate
+        end
+      end
+      out[#out + 1] = line
+    end
+  end
+  return out
+end
+
 --- Append a bold section header + horizontal separator to the line/highlight accumulators.
 --- @param lines table  mutable string array being built
 --- @param hls   DetailHlRule[]  mutable highlight-rule array being built

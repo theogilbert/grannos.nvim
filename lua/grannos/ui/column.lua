@@ -27,7 +27,7 @@ end
 local function estimate_lines(col)
   local n = 2  -- header + blank
   if not is_nil(col.comment) and col.comment ~= "" then
-    n = n + #vim.split(tostring(col.comment), "\n", { plain = true })
+    n = n + #pane.wrap_lines(col.comment, pane.COMMENT_WRAP_WIDTH)
   end
   if not is_nil(col.default) and col.default ~= "" then n = n + 4 end
   local excl = type(col.exclusive_indices) == "table" and col.exclusive_indices or {}
@@ -70,7 +70,7 @@ local function render(buf, col)
   for _, s in ipairs(specs) do hls[#hls + 1] = { s[1], row0, s[2], s[3] } end
 
   if not is_nil(col.comment) and col.comment ~= "" then
-    for _, cline in ipairs(vim.split(tostring(col.comment), "\n", { plain = true })) do
+    for _, cline in ipairs(pane.wrap_lines(col.comment, pane.COMMENT_WRAP_WIDTH)) do
       local comment_row  = #lines
       local comment_line = "  " .. cline
       lines[#lines + 1] = comment_line
@@ -183,7 +183,7 @@ function M.hover_lines(col)
   for _, s in ipairs(specs) do hls[#hls + 1] = { s[1], tag_row, s[2], s[3] } end
 
   if not is_nil(col.comment) and col.comment ~= "" then
-    for _, cline in ipairs(vim.split(tostring(col.comment), "\n", { plain = true })) do
+    for _, cline in ipairs(pane.wrap_lines(col.comment, pane.COMMENT_WRAP_WIDTH)) do
       local comment_row  = #lines
       local comment_line = "  " .. cline
       lines[#lines + 1] = comment_line
