@@ -360,28 +360,109 @@ render_describe = function(details, node)
 
   local cols = details.properties
   if cols and #cols > 0 then
-    local w_name, w_type, w_default = 4, 4, 7  -- "Name", "Type", "Default"
+    -- Null/PK/Index columns are driver-dependent concepts (e.g. Prometheus
+    -- fields have neither): only show them when at least one field actually
+    -- carries that data, instead of always rendering an all-blank column.
+    local has_nullable, has_pk, has_default, has_index = false, false, false, false
     for _, col in ipairs(cols) do
-      w_name    = math.max(w_name,    vim.fn.strdisplaywidth(col.name))
-      w_type    = math.max(w_type,    vim.fn.strdisplaywidth(field_type_string(col)))
-      local ds  = not is_nil_val(col.default) and tostring(col.default) or "—"
-      w_default = math.max(w_default, vim.fn.strdisplaywidth(ds))
+      if not is_nil_val(col.nullable) then has_nullable = true end
+      if col.pk then has_pk = true end
+      if not is_nil_val(col.default) then has_default = true end
+      local excl = type(col.exclusive_indices) == "table" and col.exclusive_indices or {}
+      local comp = type(col.composite_indices) == "table" and col.composite_indices or {}
+      if #excl > 0 or #comp > 0 then has_index = true end
     end
 
-    local idx_hdr  = "  Excl.  Comp."   -- 14 display chars
-    local idx_w    = vim.fn.strdisplaywidth(idx_hdr)
-    local grp_lbl  = "Index"
-    local prefix_w = 2 + w_name + 2 + w_type + 12 + w_default
-    local grp_off  = math.floor((idx_w - #grp_lbl) / 2)
-    local grp_line = string.rep(" ", prefix_w + grp_off) .. grp_lbl
-    table.insert(lines, grp_line)
-    add_hl("GrannosHeaderRow", #lines - 1, prefix_w + grp_off, prefix_w + grp_off + #grp_lbl)
+    --- One column of the properties table.
+    --- @class DescribeColumnSpec
+    --- @field header string
+    --- @field width  integer  set below, after scanning all fields
+    --- @field value  fun(col: table): string
+    --- @field hl     fun(col: table, s: string): string|nil  highlight group for the rendered value, or nil
 
-    local hdr = "  " .. rpad("Name", w_name)
-             .. "  " .. rpad("Type", w_type)
-             .. "  Null  PK  "
-             .. rpad("Default", w_default)
-             .. idx_hdr
+    --- @type DescribeColumnSpec[]
+    local specs = {
+      {
+        header = "Name",
+        value  = function(col) return col.name end,
+        hl     = function(col) return col.pk and "GrannosExplorerSchema" or nil end,
+      },
+      {
+        header = "Type",
+        value  = function(col) return field_type_string(col) end,
+        hl     = function() return "GrannosExplorerTable" end,
+      },
+    }
+    if has_nullable then
+      specs[#specs + 1] = {
+        header = "Null",
+        value  = function(col) return col.nullable == true and "✓" or col.nullable == false and "✗" or "" end,
+        hl     = function(_, s) return s ~= "" and "GrannosExplorerDim" or nil end,
+      }
+    end
+    if has_pk then
+      specs[#specs + 1] = {
+        header = "PK",
+        value  = function(col) return col.pk and "✓" or "" end,
+        hl     = function(col) return col.pk and "GrannosExplorerSchema" or nil end,
+      }
+    end
+    if has_default then
+      specs[#specs + 1] = {
+        header = "Default",
+        value  = function(col) return not is_nil_val(col.default) and tostring(col.default) or "—" end,
+        hl     = function() return nil end,
+      }
+    end
+    if has_index then
+      specs[#specs + 1] = {
+        header = "Excl.",
+        value  = function(col)
+          return (type(col.exclusive_indices) == "table" and #col.exclusive_indices > 0) and "✓" or ""
+        end,
+        hl = function(_, s) return s == "✓" and "GrannosExplorerIndex" or nil end,
+      }
+      specs[#specs + 1] = {
+        header = "Comp.",
+        value  = function(col)
+          return (type(col.composite_indices) == "table" and #col.composite_indices > 0) and "✓" or ""
+        end,
+        hl = function(_, s) return s == "✓" and "GrannosExplorerIndex" or nil end,
+      }
+    end
+
+    for _, spec in ipairs(specs) do
+      local w = vim.fn.strdisplaywidth(spec.header)
+      for _, col in ipairs(cols) do
+        w = math.max(w, vim.fn.strdisplaywidth(spec.value(col)))
+      end
+      spec.width = w
+    end
+
+    local GAP = "  "
+
+    if has_index then
+      local excl_off, idx_w, offset = nil, 0, 2  -- 2 = left margin
+      for _, spec in ipairs(specs) do
+        if spec.header == "Excl." then excl_off = offset end
+        if spec.header == "Excl." or spec.header == "Comp." then
+          idx_w = offset + spec.width - excl_off
+        end
+        offset = offset + spec.width + #GAP
+      end
+      local grp_lbl  = "Index"
+      local grp_off  = excl_off + math.floor((idx_w - #grp_lbl) / 2)
+      local grp_line = string.rep(" ", grp_off) .. grp_lbl
+      table.insert(lines, grp_line)
+      add_hl("GrannosHeaderRow", #lines - 1, grp_off, grp_off + #grp_lbl)
+    end
+
+    local hdr_parts = { "  " }
+    for i, spec in ipairs(specs) do
+      hdr_parts[#hdr_parts + 1] = rpad(spec.header, spec.width)
+      if i < #specs then hdr_parts[#hdr_parts + 1] = GAP end
+    end
+    local hdr = table.concat(hdr_parts)
     table.insert(lines, hdr)
     add_hl("GrannosHeaderRow", #lines - 1, 0, #hdr)
 
@@ -390,15 +471,8 @@ render_describe = function(details, node)
     add_hl("GrannosBorder", #lines - 1, 0, #sep)
 
     for _, col in ipairs(cols) do
-      local null_s    = col.nullable == true and "✓" or col.nullable == false and "✗" or " "
-      local pk_s      = col.pk and "✓" or " "
-      local default_s = not is_nil_val(col.default) and tostring(col.default) or "—"
-      local excl_s    = (type(col.exclusive_indices) == "table" and #col.exclusive_indices > 0) and "✓" or " "
-      local comp_s    = (type(col.composite_indices) == "table" and #col.composite_indices > 0) and "✓" or " "
-
       local row_idx = #lines
-      local parts   = {}
-      local pos     = 0
+      local parts, pos = {}, 0
       local function seg(s, grp)
         if grp then add_hl(grp, row_idx, pos, pos + #s) end
         parts[#parts + 1] = s
@@ -406,19 +480,11 @@ render_describe = function(details, node)
       end
 
       seg("  ")
-      seg(rpad(col.name, w_name), col.pk and "GrannosExplorerSchema" or nil)
-      seg("  ")
-      seg(rpad(field_type_string(col), w_type),  "GrannosExplorerTable")
-      seg("   ")
-      seg(null_s,  null_s ~= " " and "GrannosExplorerDim" or nil)
-      seg("    ")
-      seg(pk_s,    col.pk         and "GrannosExplorerSchema" or nil)
-      seg("   ")
-      seg(rpad(default_s, w_default))
-      seg("    ")
-      seg(excl_s,  excl_s == "✓" and "GrannosExplorerIndex" or nil)
-      seg("      ")
-      seg(comp_s,  comp_s == "✓"  and "GrannosExplorerIndex" or nil)
+      for i, spec in ipairs(specs) do
+        local v = spec.value(col)
+        seg(rpad(v, spec.width), spec.hl(col, v))
+        if i < #specs then seg(GAP) end
+      end
 
       table.insert(lines, table.concat(parts))
     end
