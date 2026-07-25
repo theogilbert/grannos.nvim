@@ -370,6 +370,49 @@ local function driver_param_field(p, current)
   return field
 end
 
+--- Return `driver`'s session_params list (runtime-only settings changeable via
+--- session.set — see docs/protocol.md), or an empty list if the driver
+--- declares none or isn't found in caps.
+--- @param caps   table
+--- @param driver string
+--- @return table[]  DriverParam descriptors
+local function find_session_params(caps, driver)
+  for _, tech in ipairs(caps.drivers or {}) do
+    if tech.driver == driver then return tech.session_params or {} end
+  end
+  return {}
+end
+
+--- Build ConnFormFields for `driver`'s session_params, seeded from `current`
+--- (as returned by session.get), for the session-settings form. Empty when
+--- the driver declares no session_params.
+--- @param caps    table
+--- @param driver  string
+--- @param current table|nil  current session values, keyed by param key
+--- @return table[]  ConnFormField list
+function M.session_fields(caps, driver, current)
+  local fields = {}
+  for _, p in ipairs(find_session_params(caps, driver)) do
+    table.insert(fields, driver_param_field(p, current))
+  end
+  return fields
+end
+
+--- Coerce raw session-form values (gathered from a session_fields-built form)
+--- into the shape expected by session.set, mirroring build_connect_params's
+--- integer coercion for connect params.
+--- @param caps   table
+--- @param driver string
+--- @param values table  raw values gathered from the form
+--- @return table
+function M.build_session_values(caps, driver, values)
+  local fields = find_session_params(caps, driver)
+  local out = {}
+  for _, p in ipairs(fields) do out[p.key] = values[p.key] end
+  coerce_integer_fields(fields, out)
+  return out
+end
+
 --- Build a Yes/No ConnFormField.
 --- @param key     string
 --- @param label   string

@@ -494,6 +494,53 @@ function M.open_explorer_for(name)
   explorer.open(conn.conn_id, connections.conn_display_name(name), conn.driver, name, conn.driver_label)
 end
 
+--- Open a form to view/change a live connection's runtime-only session
+--- settings (session.set/session.get — see docs/protocol.md), e.g.
+--- Prometheus's query_mode. Never persisted to connections.json. Notifies
+--- and does nothing if the connection isn't open or its driver has no
+--- session settings.
+--- @param key string  composite connection key
+function M.open_session_settings_for(key)
+  local conn = state.conns[key]
+  if not conn then
+    vim.notify(("grannos: not connected to %q — press <CR> to connect first"):format(connections.conn_display_name(key)), vim.log.levels.ERROR)
+    return
+  end
+  client.get_session(conn.conn_id, function(err, current)
+    if err then
+      vim.notify(("grannos: %s has no session settings"):format(conn.driver_label or conn.driver), vim.log.levels.WARN)
+      return
+    end
+    local caps   = client.capabilities() or { drivers = {} }
+    local fields = connections.session_fields(caps, conn.driver, current)
+    if #fields == 0 then
+      vim.notify(("grannos: %s has no session settings"):format(conn.driver_label or conn.driver), vim.log.levels.WARN)
+      return
+    end
+    require("grannos.ui.conn_form").open({
+      title     = "Session Settings",
+      fields    = fields,
+      on_cancel = function() end,
+      on_submit = function(values, done)
+        local session_values = connections.build_session_values(caps, conn.driver, values)
+        client.set_session(conn.conn_id, session_values, function(err2)
+          done(err2)
+        end)
+      end,
+    })
+  end)
+end
+
+--- Open the session settings form for the current buffer's connection.
+function M.open_session_settings()
+  local key = state.buf_conns[vim.api.nvim_get_current_buf()]
+  if not key then
+    vim.notify("grannos: no active connection — run :DbAttach first", vim.log.levels.WARN)
+    return
+  end
+  M.open_session_settings_for(key)
+end
+
 --- Open the schema explorer for the current buffer's connection.
 function M.open_explorer()
   local key = state.buf_conns[vim.api.nvim_get_current_buf()]

@@ -123,6 +123,23 @@ function M.cancel(request_id, callback)
   M.request("cancel", { request_id = request_id }, callback or function() end)
 end
 
+--- Update runtime-only session settings on a live connection (never persisted
+--- to connections.json; see capabilities.drivers[].session_params).
+--- @param conn_id  string
+--- @param values   table  driver-specific session_params fields to change
+--- @param callback fun(err: string|nil, result: any)
+function M.set_session(conn_id, values, callback)
+  local params = vim.tbl_extend("force", { connection_id = conn_id }, values)
+  M.request("session.set", params, callback)
+end
+
+--- Fetch a live connection's current session-only setting values.
+--- @param conn_id  string
+--- @param callback fun(err: string|nil, result: table|nil)
+function M.get_session(conn_id, callback)
+  M.request("session.get", { connection_id = conn_id }, callback)
+end
+
 --- Start the backend process identified by `cmd`.
 --- Errors if the process cannot be spawned (e.g. command not found).
 --- @param cmd string  shell command to launch the backend

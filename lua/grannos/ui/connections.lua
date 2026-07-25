@@ -1,7 +1,7 @@
 -- Panel listing all saved connections, grouped by driver then group.
 -- Keymaps: <CR> expand/collapse or connect, b jump to buffer, e edit, c clone, D delete,
---          n new connection, G new group, d disconnect, x explore, l load queries, L query log,
---          K hover, ? driver help, R refresh, q close.
+--          n new connection, G new group, d disconnect, x explore, s session settings,
+--          l load queries, L query log, K hover, ? driver help, R refresh, q close.
 local M = {}
 
 local Buffer      = require("grannos.buffer")
@@ -283,6 +283,13 @@ local function on_explore()
   require("grannos").open_explorer_for(entry.key)
 end
 
+--- s key handler: open the session settings form for the connection under the cursor.
+local function on_session_settings()
+  local entry = entry_at_cursor()
+  if not entry or entry.type ~= "conn" then return end
+  require("grannos").open_session_settings_for(entry.key)
+end
+
 --- b key handler: jump to a buffer associated with the connection under the cursor.
 local function on_jump()
   local entry = entry_at_cursor()
@@ -523,6 +530,7 @@ function M.open()
     state.buffer:set_keymap("n", "D",       on_delete,     { nowait = true, silent = true, desc = "Delete",                    group = "Manage" })
     state.buffer:set_keymap("n", "d",       on_disconnect,  { nowait = true, silent = true, desc = "Disconnect",                group = "Session" })
     state.buffer:set_keymap("n", "x",       on_explore,     { nowait = true, silent = true, desc = "Open explorer",             group = "Session" })
+    state.buffer:set_keymap("n", "s",       on_session_settings, { nowait = true, silent = true, desc = "Session settings",     group = "Session" })
     state.buffer:set_keymap("n", "l",       on_load_query,  { nowait = true, silent = true, desc = "Load saved queries",        group = "Session" })
     state.buffer:set_keymap("n", "L",       on_query_log,   { nowait = true, silent = true, desc = "Query log",                 group = "Session" })
     state.buffer:set_keymap("n", hover_key, on_hover,      { nowait = true, silent = true, desc = "Hover details / error",     group = "Info" })

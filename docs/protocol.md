@@ -416,6 +416,59 @@ Returns documentation for a specific driver as a markdown string. Clients should
 
 ---
 
+### `session.set`
+
+Changes one or more of a live connection's [session_params](#driver) values. Unlike `connect.params`, these are held only in memory on the server — never written to a saved connection — and take effect immediately without reconnecting. A driver with no `session_params` rejects this call with an error.
+
+**params**
+
+| Field           | Type   | Description                                                    |
+|-----------------|--------|------------------------------------------------------------------|
+| `connection_id` | string | Connection to update                                              |
+| …               | …      | Driver-specific fields, per that driver's `session_params`        |
+
+**result**
+
+```json
+{"ok": true}
+```
+
+**example**
+
+```json
+{"id":6,"method":"session.set","params":{"connection_id":"0","query_mode":"range"}}
+```
+```json
+{"id":6,"result":{"ok":true},"error":null}
+```
+
+---
+
+### `session.get`
+
+Returns a live connection's current `session_params` values — e.g. to restore UI state after reopening the connections panel, since these settings aren't persisted anywhere the client already holds them.
+
+**params**
+
+| Field           | Type   | Description             |
+|-----------------|--------|--------------------------|
+| `connection_id` | string | Connection to query      |
+
+**result**
+
+Driver-specific fields, per that driver's `session_params`.
+
+**example**
+
+```json
+{"id":7,"method":"session.get","params":{"connection_id":"0"}}
+```
+```json
+{"id":7,"result":{"query_mode":"range"},"error":null}
+```
+
+---
+
 ## Driver
 
 Each entry in the `capabilities.drivers` array:
@@ -425,6 +478,7 @@ Each entry in the `capabilities.drivers` array:
 | `driver`    | string                            | Driver identifier; passed as `driver` in `connect.params` |
 | `label`     | string                            | Human-readable display name (e.g. `"SQLite"`, `"SQL Server"`) |
 | `params`    | array of [DriverParam](#driverparam) | Connection parameters, in display order      |
+| `session_params` | array of [DriverParam](#driverparam) | Runtime-only settings changeable on a live connection via [`session.set`](#sessionset)/[`session.get`](#sessionget) — never sent as part of `connect.params` and never persisted alongside a saved connection. Empty when the driver has no such settings. |
 | `languages` | array of [Language](#language)    | Query languages this driver supports. Empty when the driver has no language affinity. |
 
 ## Language

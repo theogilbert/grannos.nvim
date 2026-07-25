@@ -324,3 +324,58 @@ describe("Test Connection button (on_test)", function()
     assert.equals("hunter2", client_stub.requests[1].params.password)
   end)
 end)
+
+local SESSION_CAPS = {
+  server = "srv",
+  drivers = {
+    {
+      driver = "prom",
+      label  = "Prometheus",
+      params = {
+        { key = "url", type = "string", label = "URL", default = "http://localhost:9090" },
+      },
+      session_params = {
+        {
+          key     = "query_mode",
+          type    = "enum",
+          label   = "Query Mode",
+          choices = { { value = "instant", label = "Instant" }, { value = "range", label = "Range" } },
+          default = "instant",
+        },
+      },
+    },
+  },
+}
+
+describe("connections.session_fields", function()
+  it("builds a ConnFormField per session_params entry", function()
+    local fields = connections.session_fields(SESSION_CAPS, "prom", nil)
+    assert.equals(1, #fields)
+    assert.equals("query_mode", fields[1].key)
+    assert.equals("choice", fields[1].kind)
+  end)
+
+  it("seeds the field from current session values when given", function()
+    local fields = connections.session_fields(SESSION_CAPS, "prom", { query_mode = "range" })
+    assert.equals("range", fields[1].get())
+  end)
+
+  it("falls back to the param's default when current is nil", function()
+    local fields = connections.session_fields(SESSION_CAPS, "prom", nil)
+    assert.equals("instant", fields[1].get())
+  end)
+
+  it("returns an empty list for a driver with no session_params", function()
+    local fields = connections.session_fields(SESSION_CAPS, "no_such_driver", nil)
+    assert.same({}, fields)
+  end)
+end)
+
+describe("connections.build_session_values", function()
+  it("extracts only declared session_params keys from raw form values", function()
+    local values = connections.build_session_values(
+      SESSION_CAPS, "prom", { query_mode = "range", extra = "ignored" }
+    )
+    assert.same({ query_mode = "range" }, values)
+  end)
+end)
