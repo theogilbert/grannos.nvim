@@ -184,7 +184,7 @@ describe("connections.edit (form-based)", function()
     connections.edit(key, CAPS, function() end)
     assert.equals("mydb", find(stub.last.fields, "name").get())
     assert.equals("localhost", find(stub.last.fields, "host").get())
-    assert.equals("(not set)", find(stub.last.fields, "password").display())
+    assert.equals("(empty)", find(stub.last.fields, "password").display())
   end)
 
   it("renames the connection and moves it under the new key", function()
@@ -211,7 +211,7 @@ describe("connections.edit (form-based)", function()
     -- Re-open edit and submit without touching the password field.
     local got_params
     connections.edit(key, CAPS, function(_, params) got_params = params end)
-    assert.equals("(unchanged)", find(stub.last.fields, "password").display())
+    assert.equals("********", find(stub.last.fields, "password").display())
     submit(stub.last)
     assert.equals("hunter2", got_params.password)
   end)

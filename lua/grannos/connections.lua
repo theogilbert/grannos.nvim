@@ -389,17 +389,22 @@ end
 
 --- Build the password (+ "Remember password") ConnFormFields for `pw_param`.
 --- `had_value` seeds the unedited display: for create this is always false
---- ("(not set)"); for edit/clone it reflects whether the connection already
---- has a password or a `requires_password` flag ("(unchanged)").
---- Leaving the field unedited always means "keep whatever is already there"
---- (or "no password", for create) — mirrors the old prompt_password_and_remember
---- semantics, minus its "confirm empty password" dialog: the form shows the
---- set/not-set state persistently, so a failed paste is immediately visible.
+--- ("(empty)"); for edit/clone it reflects whether the connection already has
+--- a password or a `requires_password` flag (masked stars). Leaving the field
+--- unedited always means "keep whatever is already there" (or "no password",
+--- for create) — mirrors the old prompt_password_and_remember semantics,
+--- minus its "confirm empty password" dialog: the form shows the set/not-set
+--- state persistently, so a failed paste is immediately visible. The mask is
+--- a fixed-width placeholder rather than one star per character, since the
+--- unedited case may be reporting a password the client never even sees the
+--- plaintext of (requires_password with no stored value) — there's no real
+--- length to reflect, so a fixed width avoids implying one.
 --- @param pw_param  table|nil
 --- @param had_value boolean
 --- @return table[]  empty when there is no secret param for this driver
 local function make_password_fields(pw_param, had_value)
   if not pw_param then return {} end
+  local PW_MASK = "********"
   local raw, edited = "", false
   local pw_field = {
     key          = "password",
@@ -407,8 +412,8 @@ local function make_password_fields(pw_param, had_value)
     kind         = "secret",
     get          = function() return { edited = edited and raw ~= "", raw = raw } end,
     display      = function()
-      if edited and raw ~= "" then return "(set)" end
-      return had_value and "(unchanged)" or "(not set)"
+      local has_value = (edited and raw ~= "") or had_value
+      return has_value and PW_MASK or "(empty)"
     end,
     edit_prefill = function() return "" end,
     commit_text  = function(v) raw = v or ""; edited = true end,
