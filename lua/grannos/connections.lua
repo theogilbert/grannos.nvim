@@ -255,6 +255,20 @@ local function driver_fields(caps, driver)
   return {}, nil
 end
 
+--- Return whether `driver` can express write operations (capabilities'
+--- `supports_writes`), so the form can skip write-related settings (e.g.
+--- "always allow writes") for a genuinely read-only driver. Defaults to true
+--- when the driver isn't found in caps, matching the field's own default.
+--- @param caps   table
+--- @param driver string
+--- @return boolean
+local function driver_supports_writes(caps, driver)
+  for _, tech in ipairs(caps.drivers or {}) do
+    if tech.driver == driver then return tech.supports_writes ~= false end
+  end
+  return true
+end
+
 --- Coerce string values for integer-typed fields back to numbers.
 --- @param fields table[]  field descriptors
 --- @param values table    mutable key→value map
@@ -834,7 +848,9 @@ function M.edit(key, caps, callback)
   local fields = { make_name_field(name), make_group_field(server, driver, group) }
   for _, p in ipairs(dfields) do table.insert(fields, driver_param_field(p, current)) end
   vim.list_extend(fields, make_password_fields(pw_param, had_password))
-  table.insert(fields, make_toggle_field("allow_writes", "Always allow write operations", current.allow_writes))
+  if driver_supports_writes(caps, driver) then
+    table.insert(fields, make_toggle_field("allow_writes", "Always allow write operations", current.allow_writes))
+  end
 
   require("grannos.ui.conn_form").open({
     title     = "Edit Connection",

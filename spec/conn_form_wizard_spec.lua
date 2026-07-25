@@ -334,6 +334,7 @@ local SESSION_CAPS = {
       params = {
         { key = "url", type = "string", label = "URL", default = "http://localhost:9090" },
       },
+      supports_writes = false,
       session_params = {
         {
           key     = "query_mode",
@@ -377,5 +378,52 @@ describe("connections.build_session_values", function()
       SESSION_CAPS, "prom", { query_mode = "range", extra = "ignored" }
     )
     assert.same({ query_mode = "range" }, values)
+  end)
+end)
+
+describe("connections.edit — allow_writes visibility (supports_writes)", function()
+  local tmp
+
+  before_each(function()
+    tmp = vim.fn.tempname() .. ".json"
+    config.setup({ connections_file = tmp })
+    connections.invalidate()
+    stub.last = nil
+  end)
+
+  after_each(function()
+    pcall(vim.fn.delete, tmp)
+  end)
+
+  --- Return whether a ConnFormField list contains `key`.
+  --- @param fields table[]
+  --- @param key    string
+  --- @return boolean
+  local function has_field(fields, key)
+    for _, f in ipairs(fields) do
+      if f.key == key then return true end
+    end
+    return false
+  end
+
+  it("includes the allow_writes toggle for a driver that supports writes (default)", function()
+    connections.create(CAPS, function() end, { driver = "pg" })
+    find(stub.last.fields, "name").commit_text("mydb")
+    find(stub.last.fields, "host").commit_text("localhost")
+    submit(stub.last)
+    stub.last = nil
+
+    connections.edit(connections.conn_key("srv", "pg", "", "mydb"), CAPS, function() end)
+    assert.is_true(has_field(stub.last.fields, "allow_writes"))
+  end)
+
+  it("omits the allow_writes toggle for a driver with supports_writes = false", function()
+    connections.create(SESSION_CAPS, function() end, { driver = "prom" })
+    find(stub.last.fields, "name").commit_text("myprom")
+    submit(stub.last)
+    stub.last = nil
+
+    connections.edit(connections.conn_key("srv", "prom", "", "myprom"), SESSION_CAPS, function() end)
+    assert.is_false(has_field(stub.last.fields, "allow_writes"))
   end)
 end)
