@@ -380,11 +380,10 @@ local function make_toggle_field(key, label, initial)
   return {
     key     = key,
     label   = label,
-    kind    = "choice",
+    kind    = "toggle",
     get     = function() return value end,
-    display = function() return value and "Yes" or "No" end,
-    options = function() return { { value = false, label = "No" }, { value = true, label = "Yes" } } end,
-    commit_choice = function(item) value = item.value end,
+    display = function() return value and "[x]" or "[ ]" end,
+    toggle  = function() value = not value end,
   }
 end
 

@@ -1,12 +1,14 @@
 -- A single persistent form for creating/editing/cloning a connection.
 -- All fields are shown at once and can be edited in any order: j/k move focus,
--- <CR> edits the focused field in place — an editable overlay right over the
--- value cell for text/secret fields, a dropdown directly below the row for
--- choice fields — <C-s> submits, q/<Esc> cancels the whole form. Cancelling an
--- individual field edit only returns focus to the form — it never discards the
--- rest of the form's state. A "Test Connection" button, when the caller
--- supplies on_test, sits below the fields as one more navigable row: <CR>
--- there runs the check and shows a green check or a red cross + error inline.
+-- <CR>/<Space> update whatever is under the cursor — the one universal action
+-- for every row: an editable overlay right over the value cell for text/secret
+-- fields, a dropdown directly below the row for choice fields, a direct flip
+-- for checkbox (toggle) fields, no popup at all — <C-s> submits, q/<Esc>
+-- cancels the whole form. Cancelling an individual field edit only returns
+-- focus to the form — it never discards the rest of the form's state. A "Test
+-- Connection" button, when the caller supplies on_test, sits below the fields
+-- as one more navigable row: <CR>/<Space> there runs the check and shows a
+-- green check or a red cross + error inline.
 local M = {}
 
 local hl     = require("grannos.hl")
@@ -20,7 +22,7 @@ local f = {}
 local HELP_KEYMAPS = {
   { lhs = "j/<Down>", desc = "Next field/button",     group = "Navigate" },
   { lhs = "k/<Up>",   desc = "Previous field/button", group = "Navigate" },
-  { lhs = "<CR>",     desc = "Edit field, or run Test Connection", group = "Navigate" },
+  { lhs = "<CR>/<Space>", desc = "Update the field under the cursor (edit, toggle checkbox, or run Test Connection)", group = "Navigate" },
   { lhs = "<C-s>",    desc = "Save",           group = "" },
   { lhs = "q/<Esc>",  desc = "Cancel",         group = "" },
   { lhs = "g?",       desc = "Show this help", group = "" },
@@ -72,7 +74,7 @@ local function render()
     table.insert(lines, "  \xE2\x9C\x97 " .. f.error)  -- ✗
     table.insert(lines, "")
   end
-  table.insert(lines, "  <Enter> edit   <C-s> save   q/<Esc> cancel   g? help")
+  table.insert(lines, "  <Enter>/<Space> update   <C-s> save   q/<Esc> cancel   g? help")
 
   vim.bo[f.buf].modifiable = true
   vim.api.nvim_buf_set_lines(f.buf, 0, -1, false, lines)
@@ -312,9 +314,11 @@ local function test_connection()
   end)
 end
 
---- Activate the row currently under the cursor: run Test Connection (button
---- row), or open a field's dropdown (choice fields) / in-place text overlay
---- (text/secret fields).
+--- Activate the row currently under the cursor — the single, universal
+--- "update this" action for every row, bound to both <CR> and <Space>: run
+--- Test Connection (button row), flip a checkbox (toggle fields), open a
+--- dropdown (choice fields), or open the in-place text overlay (text/secret
+--- fields).
 local function activate()
   if f.on_test and f.cursor > #f.fields then
     test_connection()
@@ -322,7 +326,10 @@ local function activate()
   end
   local field = f.fields[f.cursor]
   if not field then return end
-  if field.kind == "choice" then
+  if field.kind == "toggle" then
+    field.toggle()
+    render()
+  elseif field.kind == "choice" then
     open_dropdown(field)
   else
     open_text_overlay(field)
@@ -366,8 +373,9 @@ end
 --- @param opts table
 ---   .title     string
 ---   .fields    table[]  ConnFormField list (see module docstring for the shape:
----              key, label, kind ("text"|"secret"|"choice"), get, display, is_valid,
----              edit_prefill/commit_text for text/secret, options/commit_choice for choice)
+---              key, label, kind ("text"|"secret"|"choice"|"toggle"), get, display, is_valid,
+---              edit_prefill/commit_text for text/secret, options/commit_choice for choice,
+---              toggle for toggle)
 ---   .on_submit fun(values: table<string, any>, done: fun(err: string|nil))
 ---   .on_cancel fun()
 ---   .on_test   fun(values: table<string, any>, done: fun(ok: boolean, err: string|nil))|nil
@@ -428,7 +436,8 @@ function M.open(opts)
   map("<Down>", nav_down)
   map("k",      nav_up)
   map("<Up>",   nav_up)
-  map("<CR>",   activate)
+  map("<CR>",    activate)
+  map("<Space>", activate)
   map("<C-s>",  submit)
   map("q",      cancel)
   map("<Esc>",  cancel)

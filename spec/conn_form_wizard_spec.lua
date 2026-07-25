@@ -136,7 +136,7 @@ describe("connections.create (form-based)", function()
     find(stub.last.fields, "name").commit_text("mydb")
     find(stub.last.fields, "host").commit_text("localhost")
     find(stub.last.fields, "password").commit_text("hunter2")
-    find(stub.last.fields, "remember_password").commit_choice({ value = true })
+    find(stub.last.fields, "remember_password").toggle()
 
     submit(stub.last)
     assert.equals("hunter2", got_params.password)
@@ -205,7 +205,7 @@ describe("connections.edit (form-based)", function()
     local key = connections.conn_key("srv", "pg", "", "mydb")
     connections.edit(key, CAPS, function() end)
     find(stub.last.fields, "password").commit_text("hunter2")
-    find(stub.last.fields, "remember_password").commit_choice({ value = true })
+    find(stub.last.fields, "remember_password").toggle()
     submit(stub.last)
 
     -- Re-open edit and submit without touching the password field.
@@ -313,7 +313,7 @@ describe("Test Connection button (on_test)", function()
     find(stub.last.fields, "name").commit_text("mydb")
     find(stub.last.fields, "host").commit_text("localhost")
     find(stub.last.fields, "password").commit_text("hunter2")
-    find(stub.last.fields, "remember_password").commit_choice({ value = true })
+    find(stub.last.fields, "remember_password").toggle()
     submit(stub.last)
 
     stub.last = nil
