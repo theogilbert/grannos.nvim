@@ -13,6 +13,8 @@ local LOB_FG       = "#6B7280"
 local HELP_FG      = "#4B9CD3"
 local THOUSANDS_FG = "#767676"
 local SCROLLBAR_FG = "#888888"
+local BOOL_TRUE_FG  = "#98C379"  -- same green as GrannosQuerySuccess
+local BOOL_FALSE_FG = ERROR_FG
 local EDIT_BG      = "#1F3D2B"  -- subtle green, echoing the common insert-mode statusline color
 
 local DIAGRAM_ROOT_TABLE_FG = "#DAA520" -- gold, reserved for a diagram's source/root table
@@ -68,6 +70,8 @@ local function build_highlights()
     GrannosHelp      = { fg = HELP_FG, italic = true },
     GrannosThousandsSeparator = { fg = THOUSANDS_FG },
     GrannosScrollbarThumb     = { fg = SCROLLBAR_FG },
+    GrannosBoolTrue           = { fg = BOOL_TRUE_FG,  bold = true },
+    GrannosBoolFalse          = { fg = BOOL_FALSE_FG, bold = true },
     [M.DIAGRAM_ROOT_TABLE]      = { fg = DIAGRAM_ROOT_TABLE_FG, bold = true },
   }
   for i, group in ipairs(M.DIAGRAM_TABLE_PALETTE) do
