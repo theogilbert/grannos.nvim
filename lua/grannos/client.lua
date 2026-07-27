@@ -156,7 +156,9 @@ function M.start(cmd)
       for _, entry in pairs(pending) do
         entry.cb("backend exited", nil)
       end
-      if code ~= 0 then
+      if code == 127 then
+        vim.notify("`grannos` not found in PATH. Are you sure that it is correctly installed?", vim.log.levels.ERROR)
+      elseif code ~= 0 then
         vim.notify(("grannos: backend exited with code %d"):format(code), vim.log.levels.ERROR)
       end
     end,
