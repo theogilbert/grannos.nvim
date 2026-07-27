@@ -638,13 +638,17 @@ local function on_describe()
         local p = node.path
         local parts = vim.list_slice(p, 1, #p - 1)
         local ctx = table.concat(parts, ".")
-        -- Group-describe arrays come back as a bare list of either FieldDescription
-        -- or IndexDescription; the element's own `type` tag says which (some
-        -- drivers, e.g. Neo4j's "properties" group, resolve a fields group
-        -- directly instead of requiring the parent-entity redirect above).
+        -- Group-describe arrays come back as a bare list of FieldDescription,
+        -- IndexDescription, or GenericRecordDescription; the element's own
+        -- `type` tag says which (some drivers, e.g. Neo4j's "properties"
+        -- group, resolve a fields group directly instead of requiring the
+        -- parent-entity redirect above).
         if details[1] and details[1].type == "field" then
           local title = ctx ~= "" and (" Columns · " .. ctx .. " ") or " Columns "
           require("grannos.ui.column").open({ properties = details }, title)
+        elseif details[1] and details[1].type == "generic_record" then
+          local title = ctx ~= "" and (" " .. ctx .. " ") or " Records "
+          require("grannos.ui.generic_record").open(details, title)
         else
           local title = ctx ~= "" and (" Indices · " .. ctx .. " ") or " Indices "
           require("grannos.ui.indices").open(details, title)
@@ -655,6 +659,8 @@ local function on_describe()
         require("grannos.ui.column").open_single(details)
       elseif details and details.type == "document" then
         require("grannos.ui.document").open_single(details, node.name)
+      elseif details and details.type == "generic_record" then
+        require("grannos.ui.generic_record").open_single(details)
       else
         open_describe_float(details, node)
       end

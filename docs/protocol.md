@@ -289,7 +289,7 @@ Returns detailed metadata about a specific node.
 
 | Field     | Type                       | Description                    |
 |-----------|----------------------------|---------------------------------|
-| `details` | object, array, or null     | Description, or null if the path does not resolve to a describable node. A path that names a *group* of items (currently only an indexes group, e.g. `["public", "users", "indexes"]`) returns a bare array of the singular type instead of a wrapper object. Discriminate a single object on its `type` field: `"entity"` → [EntityDescription](#entitydescription), `"field"` → [FieldDescription](#fielddescription), `"index"` → [IndexDescription](#indexdescription), `"relationship"` → [TableReference](#tablereference), `"document"` → [RawDocument](#rawdocument). An array is always `array of [IndexDescription](#indexdescription)`. |
+| `details` | object, array, or null     | Description, or null if the path does not resolve to a describable node. A path that names a *group* of items (e.g. an indexes group `["public", "users", "indexes"]`, or a driver-specific group like a Prometheus job's targets) returns a bare array of the singular type instead of a wrapper object — a group's element type depends on which group it is. Either way, discriminate each object on its own `type` field: `"entity"` → [EntityDescription](#entitydescription), `"field"` → [FieldDescription](#fielddescription), `"index"` → [IndexDescription](#indexdescription), `"relationship"` → [TableReference](#tablereference), `"document"` → [RawDocument](#rawdocument), `"generic_record"` → [GenericRecordDescription](#genericrecorddescription). |
 
 A field's own detail — samples, comments, index membership, FK references — is already embedded in its parent [EntityDescription](#entitydescription)'s `properties`; describing `[..., "columns", field_name]` (or the equivalent per-driver field-group segment) re-fetches that same field standalone, e.g. to refresh a single field without re-describing the whole entity. There is no group-level "list all fields" path — that's redundant with the parent entity's own `properties`.
 
@@ -479,6 +479,7 @@ Each entry in the `capabilities.drivers` array:
 | `label`     | string                            | Human-readable display name (e.g. `"SQLite"`, `"SQL Server"`) |
 | `params`    | array of [DriverParam](#driverparam) | Connection parameters, in display order      |
 | `session_params` | array of [DriverParam](#driverparam) | Runtime-only settings changeable on a live connection via [`session.set`](#sessionset)/[`session.get`](#sessionget) — never sent as part of `connect.params` and never persisted alongside a saved connection. Empty when the driver has no such settings. |
+| `supports_writes` | boolean                          | Whether this driver's query language can express write operations. `false` for a genuinely read-only driver (e.g. Prometheus/PromQL) — clients should hide write-related connection settings (e.g. "always allow writes") for such drivers. Defaults to `true`. |
 | `languages` | array of [Language](#language)    | Query languages this driver supports. Empty when the driver has no language affinity. |
 
 ## Language
@@ -642,6 +643,38 @@ Returned as `details` by `explore.describe` for a node whose natural representat
 ```json
 {"type": "document", "filetype": "yaml", "content": "global:\n  scrape_interval: 15s\n"}
 ```
+
+---
+
+## GenericRecordDescription
+
+Returned as `details` by `explore.describe` — either standalone, or as an element of the bare array returned for a group node — for a node whose natural representation is a flat set of driver-specific fields that don't fit any of the other description shapes (e.g. a Prometheus scrape target's URL, health, and last-scrape duration). This is the escape hatch for driver-specific detail views: unlike `entity`/`field`/`index`/`relationship`/`document`, the wire protocol makes no shape guarantee beyond a label/value list, so it never requires a protocol version bump to introduce a new kind of record.
+
+| Field   | Type                        | Description                                                                 |
+|---------|-----------------------------|-------------------------------------------------------------------------------|
+| `type`  | string                      | Always `"generic_record"` — use to discriminate description types            |
+| `kind`  | string                      | Namespaced, driver-owned label identifying what this record represents (e.g. `"prometheus.target"`). Clients may key an optional dedicated renderer off this; unrecognized kinds should fall back to a generic label/value rendering of `fields`. |
+| `name`  | string                      | Display name for this record (e.g. the target's instance label)              |
+| `fields`| array of [RecordField](#recordfield) | Ordered list of label/value pairs                                    |
+
+```json
+{"type": "generic_record", "kind": "prometheus.target", "name": "10.0.0.12:9100", "fields": [
+  {"label": "Scrape URL", "value": "http://10.0.0.12:9100/metrics"},
+  {"label": "Health", "value": "up"},
+  {"label": "Last Scrape Duration", "value": "12.4ms"}
+]}
+```
+
+---
+
+## RecordField
+
+One label/value pair in a [GenericRecordDescription](#genericrecorddescription)'s `fields`:
+
+| Field   | Type   | Description                          |
+|---------|--------|---------------------------------------|
+| `label` | string | Display label (e.g. `"Scrape URL"`)  |
+| `value` | string | Display value, pre-formatted by the driver |
 
 ---
 
