@@ -211,8 +211,10 @@ The query language and bind parameter syntax depend on the driver — see [Drive
 #### Cell values
 
 Each entry in a `rows` array is a plain JSON scalar (string, number, boolean), JSON `null` for
-SQL `NULL`, or a [LobPlaceholder](#lobplaceholder) object standing in for a large object value
-(CLOB/BLOB/etc.) the server did not inline into the result set.
+SQL `NULL`, a [LobPlaceholder](#lobplaceholder) object standing in for a large object value
+(CLOB/BLOB/etc.) the server did not inline into the result set, or a
+[SpecialFloat](#specialfloat) object standing in for a non-finite float value (NaN, +Inf, -Inf)
+plain JSON cannot represent (e.g. from a Prometheus query like `1/0`).
 
 ---
 
@@ -693,6 +695,27 @@ string value on the wire, instead of pattern-matching cell contents.
 ```json
 {"type": "lob", "text": "CLOB (3423 chars)"}
 ```
+
+---
+
+## SpecialFloat
+
+Stands in for a non-finite float value (NaN, +Inf, -Inf) inside a `rows` cell. Plain JSON has no
+way to represent these — `json.dumps` would otherwise emit the non-standard `NaN`/`Infinity`/
+`-Infinity` tokens, which strict decoders (including this client's `vim.json.decode`) reject
+outright. Tagging the value with an object — rather than a bare string like `"NaN"` — also lets
+clients distinguish it from a real string cell without pattern-matching cell contents. Currently
+only produced by the Prometheus driver (e.g. a PromQL expression like `1/0`).
+
+| Field  | Type   | Description                                                    |
+|--------|--------|-----------------------------------------------------------------|
+| `type` | string | Always `"special_float"` — discriminates this value from a plain string cell |
+| `text` | string | Display text, e.g. `"NaN"`, `"+Inf"`, `"-Inf"`                  |
+
+```json
+{"type": "special_float", "text": "NaN"}
+```
+
 ## DiagramRegion
 
 One span in the `diagram` string returned by [`explore.diagram`](#explorediagram) that names a table, column, or relationship — in a box header, a box border row/character, a join-label line, a connector/trunk character, or a plain-text pointer. Lets a client resolve a cursor position to an `explore.describe` path without parsing the diagram text itself.

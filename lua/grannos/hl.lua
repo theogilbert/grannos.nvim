@@ -10,6 +10,7 @@ local ROW_COUNT_FG = "#7F8490"
 local CONN_FG      = "#7DB88A"
 local NULL_FG      = "#6B7280"
 local LOB_FG       = "#6B7280"
+local SPECIAL_FLOAT_FG = "#D19A66"
 local HELP_FG      = "#4B9CD3"
 local THOUSANDS_FG = "#767676"
 local SCROLLBAR_FG = "#888888"
@@ -67,6 +68,7 @@ local function build_highlights()
     GrannosRowCount  = { fg = ROW_COUNT_FG },
     GrannosNull      = { fg = NULL_FG, italic = true },
     GrannosLob       = { fg = LOB_FG, italic = true },
+    GrannosSpecialFloat = { fg = SPECIAL_FLOAT_FG, italic = true },
     GrannosHelp      = { fg = HELP_FG, italic = true },
     GrannosThousandsSeparator = { fg = THOUSANDS_FG },
     GrannosScrollbarThumb     = { fg = SCROLLBAR_FG },

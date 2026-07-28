@@ -50,6 +50,11 @@ describe("export.to_csv", function()
     local out = export.render("csv", { "body" }, { { { type = "lob", text = "CLOB (3423 chars)" } } })
     assert.equals("body\nCLOB (3423 chars)", out)
   end)
+
+  it("renders a SpecialFloat cell as its display text", function()
+    local out = export.render("csv", { "value" }, { { { type = "special_float", text = "NaN" } } })
+    assert.equals("value\nNaN", out)
+  end)
 end)
 
 describe("export.to_markdown", function()
@@ -71,6 +76,11 @@ describe("export.to_markdown", function()
   it("renders a LobPlaceholder cell as its placeholder text", function()
     local out = export.render("markdown", { "body" }, { { { type = "lob", text = "CLOB" } } })
     assert.equals("| body |\n| ---- |\n| CLOB |", out)
+  end)
+
+  it("renders a SpecialFloat cell as its display text", function()
+    local out = export.render("markdown", { "value" }, { { { type = "special_float", text = "+Inf" } } })
+    assert.equals("| value |\n| ----- |\n| +Inf  |", out)
   end)
 end)
 

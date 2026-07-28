@@ -36,6 +36,15 @@ local function is_lob(cell)
   return type(cell) == "table" and cell.type == "lob"
 end
 
+--- Whether `cell` is a SpecialFloat value (a decoded `{type="special_float", text=...}`
+--- object sent by the server in place of a NaN/Infinity/-Infinity value, which plain
+--- JSON cannot represent).
+--- @param cell any
+--- @return boolean
+local function is_special_float(cell)
+  return type(cell) == "table" and cell.type == "special_float"
+end
+
 --- Insert `sep` between digit groups in the integer part of a number's decimal
 --- representation, and swap in `decimal_sep` for the decimal point, if set.
 --- @param n           number
@@ -69,8 +78,8 @@ local function format_number(n, sep, decimal_sep)
 end
 
 --- Return the display string for a cell value, mapping vim.NIL → "NULL", a
---- LobPlaceholder object → its server-formatted `text`, and formatting numeric
---- cells with the configured thousands/decimal separators.
+--- LobPlaceholder/SpecialFloat object → its server-formatted `text`, and formatting
+--- numeric cells with the configured thousands/decimal separators.
 --- @param cell        any
 --- @param sep         string|nil  thousands-separator character, or nil/"" to disable
 --- @param decimal_sep string|nil  decimal-point character, or nil/"" for "."
@@ -79,6 +88,7 @@ local function cell_display(cell, sep, decimal_sep)
   if cell == vim.NIL then return NULL_TEXT end
   if cell == nil     then return "" end
   if is_lob(cell)    then return cell.text end
+  if is_special_float(cell) then return cell.text end
   sep         = (sep and sep ~= "") and sep or nil
   decimal_sep = (decimal_sep and decimal_sep ~= "") and decimal_sep or nil
   if type(cell) == "number" and (sep or decimal_sep) then
@@ -285,6 +295,30 @@ function M.lob_hl_rules(tbl)
       if is_lob(cell) then
         rules[#rules + 1] = {
           higroup = "GrannosLob",
+          start   = { buf_line, positions[j][1] },
+          finish  = { buf_line, positions[j][2] },
+        }
+      end
+    end
+  end
+  return rules
+end
+
+--- Return highlight rules for all SpecialFloat cells (NaN/Infinity/-Infinity) in the data rows.
+--- @param tbl FormattedTable
+--- @return table   list of { higroup, start, finish } rules
+function M.special_float_hl_rules(tbl)
+  local rules = {}
+  -- tbl.lines[1] = header; data rows start at tbl.lines[2].
+  -- With one separator after the header, data row i maps to 0-indexed buffer line i.
+  for i = 2, #tbl.lines do
+    local row      = tbl.lines[i]
+    local buf_line = i
+    local positions = M.column_byte_positions(row, tbl.columns_width, tbl.sep, tbl.decimal_sep)
+    for j, cell in ipairs(row) do
+      if is_special_float(cell) then
+        rules[#rules + 1] = {
+          higroup = "GrannosSpecialFloat",
           start   = { buf_line, positions[j][1] },
           finish  = { buf_line, positions[j][2] },
         }

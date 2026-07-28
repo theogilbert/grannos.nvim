@@ -79,6 +79,18 @@ describe("table.from_structured_data LOB handling", function()
   end)
 end)
 
+describe("table.from_structured_data SpecialFloat handling", function()
+  it("renders SpecialFloat cells as their text and flags them via special_float_hl_rules", function()
+    local cell = { type = "special_float", text = "NaN" }
+    local tbl = table_fmt.from_structured_data({ { "value" }, { cell } }, 1, nil, ".")
+    local text = table.concat(tbl.text, "\n")
+    assert.is_not_nil(text:find("NaN", 1, true))
+    local rules = table_fmt.special_float_hl_rules(tbl)
+    assert.equals(1, #rules)
+    assert.equals("GrannosSpecialFloat", rules[1].higroup)
+  end)
+end)
+
 describe("table.get_column_at_cursor", function()
   it("resolves the column at a given virtual cursor position, and nil on separators", function()
     local widths = { 5, 4 }  -- │<5 cols>│<4 cols>│
