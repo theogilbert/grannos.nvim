@@ -32,9 +32,9 @@ local state = {
 --- @param server      string
 --- @param server_data table   the connections data for one server
 --- @param active_set  table<string, boolean>  keys of currently active connections
---- @return string[], table[], table<integer, string>
+--- @return string[], table[], table<integer, string>, table[]
 local function build(server, server_data, active_set)
-  local lines, line_map, hl_rules = {}, {}, {}
+  local lines, line_map, hl_rules, extra_rules = {}, {}, {}, {}
 
   --- Append a connection row at the given indent level.
   --- @param key    string   composite connection key
@@ -74,9 +74,13 @@ local function build(server, server_data, active_set)
 
     local expanded = state.expanded[driver_id]
     local chevron  = expanded and "▾ " or "▸ "
-    table.insert(lines,    chevron .. ICON_DRIVER .. " " .. label .. " (" .. total .. ")")
+    local prefix   = chevron .. ICON_DRIVER .. " " .. label
+    local suffix   = " (" .. total .. ")"
+    table.insert(lines,    prefix .. suffix)
     table.insert(line_map, { type = "header", driver = driver_id })
-    hl_rules[#lines] = "GrannosHeaderRow"
+    local row0 = #lines - 1
+    table.insert(extra_rules, { higroup = "GrannosHeaderRow",   start = { row0, 0 },       finish = { row0, #prefix } })
+    table.insert(extra_rules, { higroup = "GrannosExplorerDim", start = { row0, #prefix }, finish = { row0, -1 } })
 
     if expanded then
       local group_names = vim.tbl_keys(groups)
@@ -111,7 +115,7 @@ local function build(server, server_data, active_set)
     end
   end
 
-  return lines, line_map, hl_rules
+  return lines, line_map, hl_rules, extra_rules
 end
 
 local FOOTER = "Press g? in any pane for help"
@@ -139,7 +143,7 @@ local function refresh()
   for _, k in ipairs(db.active_keys()) do active_set[k] = true end
 
   local server_data = connections.load(server)
-  local lines, line_map, hl_rules = build(server, server_data, active_set)
+  local lines, line_map, hl_rules, extra_rules = build(server, server_data, active_set)
   state.line_map = line_map
 
   if #lines == 0 then lines = { "(no saved connections)" } end
@@ -150,6 +154,7 @@ local function refresh()
   for lnum, group in pairs(hl_rules) do
     table.insert(rules, { higroup = group, start = { lnum - 1, 0 }, finish = { lnum - 1, -1 } })
   end
+  vim.list_extend(rules, extra_rules)
   table.insert(rules, { higroup = "GrannosHelp", start = { #lines - 1, 0 }, finish = { #lines - 1, -1 } })
   state.buffer:apply_highlight(rules)
 end
