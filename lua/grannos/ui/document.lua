@@ -30,14 +30,18 @@ local function render(buf, doc)
 end
 
 --- Open a single-document detail float.
---- @param doc  table       RawDocument as decoded from the server response
---- @param name string|nil  display name of the node this was described from
-function M.open_single(doc, name)
+--- @param doc     table       RawDocument as decoded from the server response
+--- @param name    string|nil  display name of the node this was described from
+--- @param conn_id any|nil     connection to refetch from; with `path`, enables "r" to refresh
+--- @param path    string[]|nil  leaf path this document was described at
+function M.open_single(doc, name, conn_id, path)
   pane.open_single({
     item     = doc,
     title    = ICON .. (name or doc.filetype or "document"),
     render   = render,
     estimate = estimate_lines,
+    conn_id  = conn_id,
+    path     = path,
   })
 end
 

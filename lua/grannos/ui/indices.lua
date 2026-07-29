@@ -98,11 +98,15 @@ local function render(buf, idx)
 end
 
 --- Open the two-pane indices browser.
---- @param details table   Bare array of IndexDescription, as decoded from the
----                        server response (group paths return a plain array now,
----                        not a wrapper object)
---- @param title   string  Left pane window title (caller derives from the request path)
-function M.open(details, title)
+--- @param details    table      Bare array of IndexDescription, as decoded from the
+---                               server response (group paths return a plain array now,
+---                               not a wrapper object)
+--- @param title      string     Left pane window title (caller derives from the request path)
+--- @param conn_id    any|nil    connection to refetch from; with `group_path`, enables "r" to
+---                               refresh the focused index
+--- @param group_path string[]|nil  path to the indices group node; a focused index's own
+---                               leaf path is `group_path .. {name}`
+function M.open(details, title, conn_id, group_path)
   local indices = type(details) == "table" and details or {}
   if #indices == 0 then
     vim.notify("grannos: no indices found for this table", vim.log.levels.WARN)
@@ -115,17 +119,23 @@ function M.open(details, title)
     get_title  = function(idx) return ICON .. idx.name end,
     render     = render,
     estimate   = estimate_lines,
+    conn_id    = conn_id,
+    item_path  = group_path and function(idx) return vim.list_extend(vim.list_slice(group_path), { idx.name }) end or nil,
   })
 end
 
 --- Open a single-index detail float.
---- @param idx table  IndexDescription as decoded from the server response
-function M.open_single(idx)
+--- @param idx     table       IndexDescription as decoded from the server response
+--- @param conn_id any|nil     connection to refetch from; with `path`, enables "r" to refresh
+--- @param path    string[]|nil  leaf path this index was described at
+function M.open_single(idx, conn_id, path)
   pane.open_single({
     item     = idx,
     title    = ICON .. idx.name,
     render   = render,
     estimate = estimate_lines,
+    conn_id  = conn_id,
+    path     = path,
   })
 end
 

@@ -295,12 +295,50 @@ local render_describe, calculate_win_size, present_describe_float  -- forward de
 --- Open a floating window showing the describe details returned by the server for a node.
 --- @param details TableDetails|nil
 --- @param node    ExplorerNode
-local function open_describe_float(details, node)
+--- @param conn_id any|nil        connection to refetch from; with `path`, enables "r" to refresh
+--- @param path    string[]|nil   leaf path `details` was described at
+local function open_describe_float(details, node, conn_id, path)
   if not details or details == vim.NIL then
     vim.notify("grannos: nothing to describe for this node", vim.log.levels.WARN)
     return
   end
-  present_describe_float(render_describe(details, node))
+  local handle = present_describe_float(render_describe(details, node))
+
+  if conn_id and path then
+    local refreshing = false
+    local base_title = " " .. handle.title .. " "
+    --- Re-describe `path` with the server cache discarded, and redraw in place.
+    local function refresh()
+      if refreshing or not vim.api.nvim_win_is_valid(handle.win) then return end
+      refreshing = true
+      pcall(vim.api.nvim_win_set_config, handle.win, { title = base_title:gsub(" $", " (refreshing…) ") })
+      pane.refetch(conn_id, path, function(err, new_details)
+        vim.schedule(function()
+          refreshing = false
+          if not vim.api.nvim_win_is_valid(handle.win) then return end
+          if err then
+            pcall(vim.api.nvim_win_set_config, handle.win, { title = base_title })
+            vim.notify("grannos: " .. err, vim.log.levels.ERROR)
+            return
+          end
+          local new_lines, new_hls, new_title = render_describe(new_details, node)
+          local width, height = calculate_win_size(new_lines)
+          vim.bo[handle.buf].modifiable = true
+          vim.api.nvim_buf_set_lines(handle.buf, 0, -1, false, new_lines)
+          vim.bo[handle.buf].modifiable = false
+          vim.api.nvim_buf_clear_namespace(handle.buf, handle.ns, 0, -1)
+          for _, rule in ipairs(new_hls) do
+            vim.api.nvim_buf_add_highlight(handle.buf, handle.ns, rule[1], rule[2], rule[3], rule[4])
+          end
+          pcall(vim.api.nvim_win_set_config, handle.win, {
+            title = " " .. new_title .. " ", width = width, height = height,
+          })
+          pcall(vim.api.nvim_win_set_cursor, handle.win, { 1, 0 })
+        end)
+      end)
+    end
+    vim.keymap.set("n", "r", refresh, { buffer = handle.buf, nowait = true, silent = true })
+  end
 end
 
 --- Return display lines, highlight rules, and window title for a describe float (pure).
@@ -560,6 +598,7 @@ end
 --- @param lines     string[]
 --- @param hl_rules  HlRule[]
 --- @param win_title string
+--- @return { buf: integer, win: integer, ns: integer, title: string }
 present_describe_float = function(lines, hl_rules, win_title)
   local width, height = calculate_win_size(lines)
 
@@ -591,6 +630,8 @@ present_describe_float = function(lines, hl_rules, win_title)
     vim.keymap.set("n", key, function() pcall(vim.api.nvim_win_close, win, true) end,
       { buffer = buf, silent = true, nowait = true })
   end
+
+  return { buf = buf, win = win, ns = ns, title = win_title }
 end
 
 --- Handle the hover key: request explore.describe for the node under the cursor.
@@ -633,7 +674,7 @@ local function on_describe()
         local parts = vim.list_slice(p, 1, #p - 1)
         local ctx = table.concat(parts, ".")
         local title = ctx ~= "" and (" Columns · " .. ctx .. " ") or " Columns "
-        require("grannos.ui.column").open(details, title)
+        require("grannos.ui.column").open(details, title, state.conn_id, node.path)
       elseif is_array(details) then
         local p = node.path
         local parts = vim.list_slice(p, 1, #p - 1)
@@ -645,24 +686,24 @@ local function on_describe()
         -- parent-entity redirect above).
         if details[1] and details[1].type == "field" then
           local title = ctx ~= "" and (" Columns · " .. ctx .. " ") or " Columns "
-          require("grannos.ui.column").open({ properties = details }, title)
+          require("grannos.ui.column").open({ properties = details }, title, state.conn_id, node.path)
         elseif details[1] and details[1].type == "generic_record" then
           local title = ctx ~= "" and (" " .. ctx .. " ") or " Records "
-          require("grannos.ui.generic_record").open(details, title)
+          require("grannos.ui.generic_record").open(details, title, state.conn_id, node.path)
         else
           local title = ctx ~= "" and (" Indices · " .. ctx .. " ") or " Indices "
-          require("grannos.ui.indices").open(details, title)
+          require("grannos.ui.indices").open(details, title, state.conn_id, node.path)
         end
       elseif details and details.type == "index" then
-        require("grannos.ui.indices").open_single(details)
+        require("grannos.ui.indices").open_single(details, state.conn_id, describe_path)
       elseif details and details.type == "field" then
-        require("grannos.ui.column").open_single(details)
+        require("grannos.ui.column").open_single(details, state.conn_id, describe_path)
       elseif details and details.type == "document" then
-        require("grannos.ui.document").open_single(details, node.name)
+        require("grannos.ui.document").open_single(details, node.name, state.conn_id, describe_path)
       elseif details and details.type == "generic_record" then
-        require("grannos.ui.generic_record").open_single(details)
+        require("grannos.ui.generic_record").open_single(details, state.conn_id, describe_path)
       else
-        open_describe_float(details, node)
+        open_describe_float(details, node, state.conn_id, describe_path)
       end
     end)
   end)
@@ -842,6 +883,8 @@ end
 --- can reuse the same renderer for paths not backed by a real ExplorerNode.
 --- @param details TableDetails|nil
 --- @param node    { name: string, type: string }
+--- @param conn_id any|nil        connection to refetch from; with `path`, enables "r" to refresh
+--- @param path    string[]|nil   leaf path `details` was described at
 M.open_describe_float = open_describe_float
 
 return M

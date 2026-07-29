@@ -242,10 +242,15 @@ end
 --- record) and a table of per-record fields for a group of generic records
 --- (e.g. a Prometheus job's targets) — one row per record, even when there's
 --- only one.
---- @param details table   Bare array of GenericRecordDescription, as decoded
----                        from the server response
---- @param title   string  Window title (caller derives from the request path)
-function M.open(details, title)
+--- @param details    table      Bare array of GenericRecordDescription, as decoded
+---                               from the server response
+--- @param title      string     Window title (caller derives from the request path)
+--- @param conn_id    any|nil    connection to refetch from; with `group_path`, enables "r" to
+---                               refresh the whole set of records (there's no per-record leaf
+---                               path convention for generic records, so refresh re-describes
+---                               the whole group)
+--- @param group_path string[]|nil  path to the group node `details` was described from
+function M.open(details, title, conn_id, group_path)
   local records = type(details) == "table" and details or {}
   if #records == 0 then
     vim.notify("grannos: nothing to describe for this node", vim.log.levels.WARN)
@@ -260,18 +265,31 @@ function M.open(details, title)
 
   local ew     = vim.o.columns
   local eh     = vim.o.lines
-  local width  = math.min(math.max(widest + 2, 40), ew - 4)
   local max_h  = math.max(math.floor(eh * 0.72), 8)
-  local height = math.min(math.max(vim.api.nvim_buf_line_count(buf), 8), max_h)
-  local col0   = math.max(0, math.floor((ew - width  - 2) / 2))
-  local row0   = math.max(0, math.floor((eh - height - 2) / 2))
+  local base_title = title or " Records "
 
+  --- (Re)size and reposition the float around `buf`'s current content.
+  --- @param win integer
+  local function resize(win)
+    local width  = math.min(math.max(widest + 2, 40), ew - 4)
+    local height = math.min(math.max(vim.api.nvim_buf_line_count(buf), 8), max_h)
+    pcall(vim.api.nvim_win_set_config, win, {
+      relative = "editor",
+      row      = math.max(0, math.floor((eh - height - 2) / 2)),
+      col      = math.max(0, math.floor((ew - width  - 2) / 2)),
+      width    = width, height = height,
+    })
+  end
+
+  local init_width  = math.min(math.max(widest + 2, 40), ew - 4)
+  local init_height = math.min(math.max(vim.api.nvim_buf_line_count(buf), 8), max_h)
   local win = vim.api.nvim_open_win(buf, true, {
     relative  = "editor",
-    row       = row0, col = col0,
-    width     = width, height = height,
+    row       = math.max(0, math.floor((eh - init_height - 2) / 2)),
+    col       = math.max(0, math.floor((ew - init_width  - 2) / 2)),
+    width     = init_width, height = init_height,
     style     = "minimal", border = "rounded",
-    title     = title or " Records ",
+    title     = base_title,
     title_pos = "center",
   })
   vim.api.nvim_win_set_hl_ns(win, hl.NS_ID)
@@ -286,16 +304,53 @@ function M.open(details, title)
   })
   vim.keymap.set("n", "q",     close, { buffer = buf, nowait = true, silent = true })
   vim.keymap.set("n", "<Esc>", close, { buffer = buf, nowait = true, silent = true })
+
+  if conn_id and group_path then
+    local refreshing = false
+    --- Re-describe group_path with the server cache discarded, and redraw in place.
+    local function refresh()
+      if refreshing or not vim.api.nvim_win_is_valid(win) then return end
+      refreshing = true
+      pcall(vim.api.nvim_win_set_config, win, { title = base_title:gsub(" $", " (refreshing…) ") })
+      pane.refetch(conn_id, group_path, function(err, new_details)
+        vim.schedule(function()
+          refreshing = false
+          if not vim.api.nvim_win_is_valid(win) then return end
+          if err then
+            pcall(vim.api.nvim_win_set_config, win, { title = base_title })
+            vim.notify("grannos: " .. err, vim.log.levels.ERROR)
+            return
+          end
+          local new_records = type(new_details) == "table" and new_details or {}
+          if #new_records == 0 then
+            pcall(vim.api.nvim_win_set_config, win, { title = base_title })
+            vim.notify("grannos: no records found", vim.log.levels.WARN)
+            return
+          end
+          records = new_records
+          widest  = render_table(buf, records)
+          pcall(vim.api.nvim_win_set_config, win, { title = base_title })
+          resize(win)
+          pcall(vim.api.nvim_win_set_cursor, win, { 1, 0 })
+        end)
+      end)
+    end
+    vim.keymap.set("n", "r", refresh, { buffer = buf, nowait = true, silent = true })
+  end
 end
 
 --- Open a single-record detail float.
---- @param rec table  GenericRecordDescription as decoded from the server response
-function M.open_single(rec)
+--- @param rec     table       GenericRecordDescription as decoded from the server response
+--- @param conn_id any|nil     connection to refetch from; with `path`, enables "r" to refresh
+--- @param path    string[]|nil  leaf path this record was described at
+function M.open_single(rec, conn_id, path)
   pane.open_single({
     item     = rec,
     title    = ICON .. rec.name,
     render   = render,
     estimate = estimate_lines,
+    conn_id  = conn_id,
+    path     = path,
   })
 end
 

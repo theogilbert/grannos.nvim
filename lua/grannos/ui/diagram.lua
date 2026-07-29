@@ -279,10 +279,11 @@ function M.open(conn_id, path, title, conn_key)
 
     local edges = edge_paths_at(regions, row, col)
     if #edges > 1 then
-      local remaining     = #edges
-      local rels, colors  = {}, {}
+      local remaining              = #edges
+      local rels, colors, paths    = {}, {}, {}
       for i, edge_path in ipairs(edges) do
         colors[i] = region_hl_group({ kind = "edge", path = edge_path }, table_colors)
+        paths[i]  = edge_path
         client.request("explore.describe", { connection_id = conn_id, path = edge_path }, function(err, result)
           vim.schedule(function()
             if not err and result and result.details and result.details ~= vim.NIL then
@@ -291,20 +292,21 @@ function M.open(conn_id, path, title, conn_key)
             remaining = remaining - 1
             if remaining == 0 then
               -- Re-pack, dropping any index whose describe call failed or
-              -- resolved to nothing, so rels/colors stay aligned pairwise.
-              local final_rels, final_colors = {}, {}
+              -- resolved to nothing, so rels/colors/paths stay aligned pairwise.
+              local final_rels, final_colors, final_paths = {}, {}, {}
               for j = 1, #edges do
                 if rels[j] then
                   final_rels[#final_rels + 1]   = rels[j]
                   final_colors[#final_colors + 1] = colors[j]
+                  final_paths[#final_paths + 1] = paths[j]
                 end
               end
               if #final_rels == 0 then
                 vim.notify("grannos: nothing to describe here", vim.log.levels.WARN)
               elseif #final_rels == 1 then
-                require("grannos.ui.relationship").open_single(final_rels[1], final_colors[1])
+                require("grannos.ui.relationship").open_single(final_rels[1], final_colors[1], conn_id, final_paths[1])
               else
-                require("grannos.ui.relationship").open(final_rels, final_colors)
+                require("grannos.ui.relationship").open(final_rels, final_colors, conn_id, final_paths)
               end
             end
           end)
@@ -328,12 +330,12 @@ function M.open(conn_id, path, title, conn_key)
           return
         end
         if details.type == "field" then
-          require("grannos.ui.column").open_single(details)
+          require("grannos.ui.column").open_single(details, conn_id, region.path)
         elseif details.type == "relationship" then
-          require("grannos.ui.relationship").open_single(details, region_hl_group(region, table_colors))
+          require("grannos.ui.relationship").open_single(details, region_hl_group(region, table_colors), conn_id, region.path)
         else
           require("grannos.ui.explorer").open_describe_float(
-            details, { name = region.path[#region.path], type = "table" })
+            details, { name = region.path[#region.path], type = "table" }, conn_id, region.path)
         end
       end)
     end)

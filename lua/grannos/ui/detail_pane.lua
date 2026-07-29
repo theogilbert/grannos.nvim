@@ -5,6 +5,7 @@ local M = {}
 
 local hl         = require("grannos.hl")
 local Buffer     = require("grannos.buffer")
+local client     = require("grannos.client")
 
 --- Positional highlight entry: { group, 0-indexed-row, byte-col-start, byte-col-end }.
 --- Used in the `hls` accumulator arrays passed between section/tag_line/apply.
@@ -29,6 +30,29 @@ local NS         = vim.api.nvim_create_namespace("GrannosDetailPane")
 --- @param v any
 --- @return boolean
 function M.is_nil(v) return v == nil or v == vim.NIL end
+
+--- Re-describe `path`, discarding both this call's result and any cached
+--- explore data the server holds for it (`reset_cache = true`), so describe
+--- floats can offer an "r" refresh that reflects the database's current state
+--- rather than a stale snapshot.
+--- @param conn_id  any
+--- @param path     string[]
+--- @param callback fun(err: string|nil, details: any)
+function M.refetch(conn_id, path, callback)
+  client.request("explore.describe", { connection_id = conn_id, path = path, reset_cache = true },
+    function(err, result)
+      if err then
+        callback(err, nil)
+        return
+      end
+      local details = result and result.details
+      if M.is_nil(details) then
+        callback("nothing to describe for this item", nil)
+        return
+      end
+      callback(nil, details)
+    end)
+end
 
 --- Default word-wrap width for free-text (comments) shown in a detail float,
 --- so a long single-line database comment doesn't force the window as wide
@@ -511,6 +535,13 @@ end
 ---   .get_title  fn(item)→string   right window title for the focused item (no surrounding spaces)
 ---   .render     fn(buf, item)     populate the right buffer for the focused item
 ---   .estimate   fn(item)→number   estimated rendered line count (for window sizing)
+---   .conn_id       any|nil               connection to refetch from; with `.item_path`, enables
+---                                        "r" to refresh the focused item
+---   .item_path     fn(item)→string[]|nil leaf path to re-describe the focused item, or nil
+---                                        to disable refresh for that item
+---   .apply_refresh fn(item, details)|nil merges refetched `details` into `item` in place;
+---                                        defaults to replacing every field of `item` with
+---                                        `details`' own fields
 function M.open_searchable_two_pane(opts)
   local items = opts.items
   if #items == 0 then
@@ -552,16 +583,27 @@ function M.open_searchable_two_pane(opts)
   vim.api.nvim_win_set_hl_ns(rwin, hl.NS_ID)
   vim.api.nvim_set_option_value("wrap", false, { win = rwin })
 
+  local current_item  -- the item currently synced into the right pane, for "r" to refresh
+
   --- Sync the right pane to reflect the currently-selected item.
   --- @param item any|nil
   local function sync(item)
     if not item then return end
+    current_item = item
     pcall(vim.api.nvim_win_set_config, rwin, {
       title     = " " .. opts.get_title(item) .. " ",
       title_pos = "center",
     })
     opts.render(rbuf, item)
     pcall(vim.api.nvim_win_set_cursor, rwin, { 1, 0 })
+  end
+
+  local can_refresh = opts.conn_id ~= nil and opts.item_path ~= nil
+  local extra_help  = {
+    { lhs = "<Tab>", desc = "Switch between list and detail pane", group = "Navigate" },
+  }
+  if can_refresh then
+    table.insert(extra_help, { lhs = "r", desc = "Refresh focused item (discard cache)", group = "Navigate" })
   end
 
   local handle = M.open_search_list({
@@ -571,11 +613,35 @@ function M.open_searchable_two_pane(opts)
     get_label   = opts.get_label,
     matches     = opts.matches,
     on_change   = sync,
-    extra_help  = {
-      { lhs = "<Tab>", desc = "Switch between list and detail pane", group = "Navigate" },
-    },
+    extra_help  = extra_help,
   })
   handle.register_win(rwin)
+
+  --- Re-describe the focused item's leaf path with the server cache discarded,
+  --- merge the result into it in place, and redraw the right pane.
+  local refreshing = false
+  local function refresh_current()
+    if not can_refresh or refreshing or not current_item then return end
+    local path = opts.item_path(current_item)
+    if not path then return end
+    refreshing = true
+    M.refetch(opts.conn_id, path, function(err, details)
+      vim.schedule(function()
+        refreshing = false
+        if err then
+          vim.notify("grannos: " .. err, vim.log.levels.ERROR)
+          return
+        end
+        if opts.apply_refresh then
+          opts.apply_refresh(current_item, details)
+        else
+          for k in pairs(current_item) do current_item[k] = nil end
+          for k, v in pairs(details) do current_item[k] = v end
+        end
+        sync(current_item)
+      end)
+    end)
+  end
 
   --- Focus the search box, ready to type.
   local function focus_input()
@@ -617,6 +683,12 @@ function M.open_searchable_two_pane(opts)
   rmap("<C-c>", handle.close)
   rmap("<Tab>", focus_input)
   rmap("<C-h>", handle.show_help)
+  if can_refresh then
+    rmap("r", refresh_current)
+    -- Also reachable straight from the list pane (e.g. after a mouse click into it).
+    local list_buf = vim.api.nvim_win_get_buf(handle.list_win)
+    vim.keymap.set("n", "r", refresh_current, { buffer = list_buf, nowait = true, silent = true })
+  end
 end
 
 --- Open a single-item detail float.
@@ -626,6 +698,8 @@ end
 ---   .title    string           window title (no surrounding spaces — they are added here)
 ---   .render   fn(buf, item)    populate the buffer
 ---   .estimate fn(item)→number  estimated line count for window height
+---   .conn_id  any|nil          connection to refetch from; with `.path`, enables "r" to refresh
+---   .path     string[]|nil     leaf path to re-describe on "r" (discarding server-side cache)
 function M.open_single(opts)
   local ew     = vim.o.columns
   local eh     = vim.o.lines
@@ -641,12 +715,13 @@ function M.open_single(opts)
 
   opts.render(buf, opts.item)
 
+  local base_title = " " .. opts.title .. " "
   local win = vim.api.nvim_open_win(buf, true, {
     relative  = "editor",
     row       = row0, col = col0,
     width     = width, height = height,
     style     = "minimal", border = "rounded",
-    title     = " " .. opts.title .. " ",
+    title     = base_title,
     title_pos = "center",
   })
   vim.api.nvim_win_set_hl_ns(win, hl.NS_ID)
@@ -662,6 +737,33 @@ function M.open_single(opts)
   })
   vim.keymap.set("n", "q",     close, { buffer = buf, nowait = true, silent = true })
   vim.keymap.set("n", "<Esc>", close, { buffer = buf, nowait = true, silent = true })
+
+  if opts.conn_id and opts.path then
+    local refreshing = false
+    --- Re-describe opts.path with the server cache discarded, and redraw in place.
+    local function refresh()
+      if refreshing or not vim.api.nvim_win_is_valid(win) then return end
+      refreshing = true
+      pcall(vim.api.nvim_win_set_config, win, { title = base_title:gsub(" $", " (refreshing…) ") })
+      M.refetch(opts.conn_id, opts.path, function(err, details)
+        vim.schedule(function()
+          refreshing = false
+          if not vim.api.nvim_win_is_valid(win) then return end
+          if err then
+            pcall(vim.api.nvim_win_set_config, win, { title = base_title })
+            vim.notify("grannos: " .. err, vim.log.levels.ERROR)
+            return
+          end
+          opts.item = details
+          opts.render(buf, details)
+          local new_height = math.min(math.max(opts.estimate(details), 8), max_h)
+          pcall(vim.api.nvim_win_set_config, win, { title = base_title, height = new_height })
+          pcall(vim.api.nvim_win_set_cursor, win, { 1, 0 })
+        end)
+      end)
+    end
+    vim.keymap.set("n", "r", refresh, { buffer = buf, nowait = true, silent = true })
+  end
 end
 
 return M

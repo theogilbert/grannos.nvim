@@ -144,12 +144,17 @@ local function render(buf, col)
 end
 
 --- Open the two-pane columns browser.
---- @param details table  EntityDescription as decoded from the server response
----                        (the group-level "columns" path no longer resolves —
----                        callers describe the parent entity and pass its
----                        `properties` list here instead)
---- @param title   string Left pane window title (caller derives from the request path)
-function M.open(details, title)
+--- @param details    table      EntityDescription as decoded from the server response
+---                               (the group-level "columns" path no longer resolves —
+---                               callers describe the parent entity and pass its
+---                               `properties` list here instead)
+--- @param title      string     Left pane window title (caller derives from the request path)
+--- @param conn_id    any|nil    connection to refetch from; with `group_path`, enables "r" to
+---                               refresh the focused column
+--- @param group_path string[]|nil  path to the columns group node (e.g. `[..., "columns"]`);
+---                               a focused column's own leaf path is `group_path .. {name}`,
+---                               per the field-refresh convention in docs/protocol.md
+function M.open(details, title, conn_id, group_path)
   local columns = type(details.properties) == "table" and details.properties or {}
   if #columns == 0 then
     vim.notify("grannos: no columns found", vim.log.levels.WARN)
@@ -162,6 +167,8 @@ function M.open(details, title)
     get_title  = function(col) return ICON .. col.name end,
     render     = render,
     estimate   = estimate_lines,
+    conn_id    = conn_id,
+    item_path  = group_path and function(col) return vim.list_extend(vim.list_slice(group_path), { col.name }) end or nil,
   })
 end
 
@@ -210,13 +217,17 @@ function M.hover_lines(col)
 end
 
 --- Open a single-column detail float.
---- @param col table  FieldDescription as decoded from the server response
-function M.open_single(col)
+--- @param col     table       FieldDescription as decoded from the server response
+--- @param conn_id any|nil     connection to refetch from; with `path`, enables "r" to refresh
+--- @param path    string[]|nil  leaf path this column was described at
+function M.open_single(col, conn_id, path)
   pane.open_single({
     item     = col,
     title    = ICON .. col.name,
     render   = render,
     estimate = estimate_lines,
+    conn_id  = conn_id,
+    path     = path,
   })
 end
 

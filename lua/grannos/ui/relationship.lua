@@ -72,15 +72,19 @@ local function render(buf, rel, color)
 end
 
 --- Open a single-relationship detail float.
---- @param rel   table       TableReference as decoded from the server response
---- @param color string|nil  highlight group of the edge this relationship was hovered
----                          from in the diagram, if any
-function M.open_single(rel, color)
+--- @param rel     table       TableReference as decoded from the server response
+--- @param color   string|nil  highlight group of the edge this relationship was hovered
+---                            from in the diagram, if any
+--- @param conn_id any|nil     connection to refetch from; with `path`, enables "r" to refresh
+--- @param path    string[]|nil  leaf path this relationship was described at
+function M.open_single(rel, color, conn_id, path)
   pane.open_single({
     item     = rel,
     title    = ICON .. rel.column .. ARROW .. rel.ref_table .. "." .. rel.ref_column,
     render   = function(buf, item) render(buf, item, color) end,
     estimate = function(item) return estimate_lines(item, color) end,
+    conn_id  = conn_id,
+    path     = path,
   })
 end
 
@@ -98,24 +102,32 @@ end
 --- (a branch point where multiple relationships share a trunk column). Each
 --- relationship keeps its own edge color, since they can belong to different
 --- tables.
---- @param rels   table[]           TableReference list as decoded from the server response
---- @param colors (string|nil)[]|nil  highlight group per entry in `rels`, same order
-function M.open(rels, colors)
+--- @param rels    table[]           TableReference list as decoded from the server response
+--- @param colors  (string|nil)[]|nil  highlight group per entry in `rels`, same order
+--- @param conn_id any|nil           connection to refetch from; with `paths`, enables "r" to
+---                                  refresh the focused relationship
+--- @param paths   (string[]|nil)[]|nil  leaf path per entry in `rels`, same order — each
+---                                  relationship was described at its own path (unlike
+---                                  columns/indices, they don't share a common group)
+function M.open(rels, colors, conn_id, paths)
   if #rels == 0 then
     vim.notify("grannos: no relationships found", vim.log.levels.WARN)
     return
   end
   local items = {}
   for i, rel in ipairs(rels) do
-    items[i] = { rel = rel, color = colors and colors[i] }
+    items[i] = { rel = rel, color = colors and colors[i], path = paths and paths[i] }
   end
   pane.open_searchable_two_pane({
-    items      = items,
-    left_title = " Relationships ",
-    get_label  = function(item) return label(item.rel) end,
-    get_title  = function(item) return ICON .. item.rel.column .. ARROW .. item.rel.ref_table .. "." .. item.rel.ref_column end,
-    render     = function(buf, item) render(buf, item.rel, item.color) end,
-    estimate   = function(item) return estimate_lines(item.rel, item.color) end,
+    items         = items,
+    left_title    = " Relationships ",
+    get_label     = function(item) return label(item.rel) end,
+    get_title     = function(item) return ICON .. item.rel.column .. ARROW .. item.rel.ref_table .. "." .. item.rel.ref_column end,
+    render        = function(buf, item) render(buf, item.rel, item.color) end,
+    estimate      = function(item) return estimate_lines(item.rel, item.color) end,
+    conn_id       = conn_id,
+    item_path     = function(item) return item.path end,
+    apply_refresh = function(item, details) item.rel = details end,
   })
 end
 
