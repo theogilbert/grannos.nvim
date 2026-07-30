@@ -779,10 +779,10 @@ local function on_preview_rows()
     end)
 end
 
---- Handle the "d" keymap: download the full content of the node under the
---- cursor into a scratch buffer (e.g. an S3 object). No-op for node types
+--- Handle the "o" keymap: open the full content of the node under the
+--- cursor in a scratch buffer (e.g. an S3 object). No-op for node types
 --- that don't support content download.
-local function on_download()
+local function on_open_in_buffer()
   local line = vim.api.nvim_win_get_cursor(0)[1]
   local node = node_at_line(line)
   if not node or not DOWNLOADABLE_TYPES[node.type] then return end
@@ -830,8 +830,8 @@ local function get_or_create_buffer()
     { nowait = true, silent = true, desc = "Preview rows" })
   state.buffer:set_keymap("n", "D", on_diagram,
     { nowait = true, silent = true, desc = "Show table diagram" })
-  state.buffer:set_keymap("n", "d", on_download,
-    { nowait = true, silent = true, desc = "Download content" })
+  state.buffer:set_keymap("n", "o", on_open_in_buffer,
+    { nowait = true, silent = true, desc = "Open content in buffer" })
   state.buffer:set_keymap("n", "q", function()
     local win = vim.fn.bufwinid(state.buffer.buf_id)
     if win ~= -1 then vim.api.nvim_win_close(win, true) end
