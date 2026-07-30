@@ -272,6 +272,17 @@
 "EXEC"    @keyword
 "EXECUTE" @keyword
 
+; ─── PSQL \copy ──────────────────────────────────────────────────────────────
+
+"\\"       @keyword
+"COPY"     @keyword
+"PROGRAM"  @keyword
+"STDIN"    @keyword
+"STDOUT"   @keyword
+"PSTDIN"   @keyword
+"PSTDOUT"  @keyword
+(copy_option name: (identifier) @attribute)
+
 ; ─── Ordered-set aggregates ──────────────────────────────────────────────────
 
 "WITHIN" @keyword
