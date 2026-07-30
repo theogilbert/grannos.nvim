@@ -24,58 +24,23 @@ describe("generic_record.field_value", function()
   end)
 end)
 
-describe("generic_record.split_common_and_varying", function()
-  it("treats a field as common when every record has the same value", function()
-    local records = {
-      rec("a", { field("Scrape Interval", "15s"), field("Health", "up") }),
-      rec("b", { field("Scrape Interval", "15s"), field("Health", "down") }),
-    }
-    local common, varying = generic_record.split_common_and_varying(records)
-    assert.same({ { label = "Scrape Interval", value = "15s" } }, common)
-    assert.same({ "Health" }, varying)
-  end)
-
-  it("treats a field as varying when values differ across records", function()
-    local records = {
-      rec("a", { field("Health", "up") }),
-      rec("b", { field("Health", "down") }),
-    }
-    local common, varying = generic_record.split_common_and_varying(records)
-    assert.same({}, common)
-    assert.same({ "Health" }, varying)
-  end)
-
-  it("treats a field as varying when missing from some records, even if equal elsewhere", function()
-    local records = {
-      rec("a", { field("Health", "up"), field("Label: shard", "1") }),
-      rec("b", { field("Health", "up") }),
-    }
-    local common, varying = generic_record.split_common_and_varying(records)
-    assert.same({ { label = "Health", value = "up" } }, common)
-    assert.same({ "Label: shard" }, varying)
-  end)
-
-  it("preserves first-seen field order across both common and varying", function()
+describe("generic_record.field_labels", function()
+  it("collects labels across records in first-seen order, without duplicates", function()
     local records = {
       rec("a", { field("Z", "same"), field("A", "1") }),
-      rec("b", { field("Z", "same"), field("A", "2") }),
+      rec("b", { field("Z", "same"), field("A", "2"), field("Label: shard", "1") }),
     }
-    local common, varying = generic_record.split_common_and_varying(records)
-    assert.same({ { label = "Z", value = "same" } }, common)
-    assert.same({ "A" }, varying)
+    local labels = generic_record.field_labels(records)
+    assert.same({ "Z", "A", "Label: shard" }, labels)
   end)
 
-  it("treats every field as varying for a single record — nothing to hoist as \"common\" with only one", function()
+  it("returns every field for a single record", function()
     local records = { rec("a", { field("Health", "up"), field("Scrape Interval", "15s") }) }
-    local common, varying = generic_record.split_common_and_varying(records)
-    assert.same({}, common)
-    assert.same({ "Health", "Scrape Interval" }, varying)
+    assert.same({ "Health", "Scrape Interval" }, generic_record.field_labels(records))
   end)
 
-  it("treats every field as varying for zero records", function()
-    local common, varying = generic_record.split_common_and_varying({})
-    assert.same({}, common)
-    assert.same({}, varying)
+  it("returns an empty list for zero records", function()
+    assert.same({}, generic_record.field_labels({}))
   end)
 end)
 

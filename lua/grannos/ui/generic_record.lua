@@ -1,9 +1,8 @@
 -- Float for a group of GenericRecordDescription (a bare array returned for
 -- driver-specific groups whose members don't fit any of the other
--- description shapes, e.g. a Prometheus job's scrape targets): fields shared
--- by every record render once as defaults, fields that vary become a table
--- with one row per record. Also a single-record detail float
--- (GenericRecordDescription).
+-- description shapes, e.g. a Prometheus job's scrape targets): every field
+-- of every record renders as a table column, one row per record. Also a
+-- single-record detail float (GenericRecordDescription).
 local M = {}
 
 local pane      = require("grannos.ui.detail_pane")
@@ -99,21 +98,13 @@ function M.field_value(rec, label)
   return nil
 end
 
---- Split the field labels seen across `records` into ones every record has
---- with an identical value (shared defaults, rendered once) and ones that
---- vary or are missing on some record (rendered as table columns instead).
---- With fewer than two records there's nothing to compare, so "common" (in
---- the sense of "shared across records") isn't a meaningful concept — every
---- label is treated as varying, so a single-record table still shows its
---- fields as columns instead of being entirely swallowed into a "Defaults"
---- block that would just restate the one row.
---- Exposed on `M` (rather than kept local) so this — the one piece of actual
---- decision-making in this module — is unit-testable independent of any
---- floating window.
+--- Return the field labels seen across `records`, in first-seen order, with
+--- duplicates removed — every one of them becomes a table column.
+--- Exposed on `M` (rather than kept local) so it's unit-testable independent
+--- of any floating window.
 --- @param records table[]  GenericRecordDescription[]
---- @return table     common          ordered {label, value}[]
---- @return string[]  varying_labels  ordered labels to render as table columns
-function M.split_common_and_varying(records)
+--- @return string[]  labels  ordered labels to render as table columns
+function M.field_labels(records)
   local label_order, seen = {}, {}
   for _, rec in ipairs(records) do
     for _, f in ipairs(rec.fields or {}) do
@@ -123,44 +114,16 @@ function M.split_common_and_varying(records)
       end
     end
   end
-
-  if #records < 2 then
-    return {}, label_order
-  end
-
-  local common, varying_labels = {}, {}
-  for _, label in ipairs(label_order) do
-    local values, all_present = {}, true
-    for _, rec in ipairs(records) do
-      local value = M.field_value(rec, label)
-      if value == nil then all_present = false end
-      values[#values + 1] = value
-    end
-    local all_equal = true
-    for i = 2, #values do
-      if values[i] ~= values[1] then
-        all_equal = false
-        break
-      end
-    end
-    if all_present and all_equal then
-      common[#common + 1] = { label = label, value = values[1] }
-    else
-      varying_labels[#varying_labels + 1] = label
-    end
-  end
-  return common, varying_labels
+  return label_order
 end
 
---- Populate `buf` with a shared-defaults header (fields identical across
---- every record, when there's more than one) followed by a table with one
---- row per record — labeled by its `name` — and one column per field that
---- varies between records (every field, when there's only one record).
+--- Populate `buf` with a table with one row per record — labeled by its
+--- `name` — and one column per field seen across the group.
 --- @param buf     integer
 --- @param records table[]  GenericRecordDescription[], non-empty
 --- @return integer widest  display width of the widest rendered line
 local function render_table(buf, records)
-  local common, varying_labels = M.split_common_and_varying(records)
+  local labels = M.field_labels(records)
   local lines, hls = {}, {}
 
   local kind = records[1].kind
@@ -172,36 +135,17 @@ local function render_table(buf, records)
     lines[#lines + 1] = ""
   end
 
-  if #common > 0 then
-    pane.section(lines, hls, "Defaults")
-    local label_w = 0
-    for _, c in ipairs(common) do
-      label_w = math.max(label_w, vim.fn.strdisplaywidth(c.label))
-    end
-    for _, c in ipairs(common) do
-      local frow   = #lines
-      local prefix = "  " .. c.label .. string.rep(" ", label_w - vim.fn.strdisplaywidth(c.label)) .. "  "
-      local value_text, value_hl = M.format_value(c.value)
-      lines[#lines + 1] = prefix .. value_text
-      hls[#hls + 1] = { "GrannosExplorerDim", frow, 2, 2 + #c.label }
-      if value_hl then
-        hls[#hls + 1] = { value_hl, frow, #prefix, #prefix + #value_text }
-      end
-    end
-    lines[#lines + 1] = ""
-  end
-
   pane.section(lines, hls, "Records (" .. #records .. ")")
 
   local header = { "Name" }
-  for _, label in ipairs(varying_labels) do header[#header + 1] = label end
+  for _, label in ipairs(labels) do header[#header + 1] = label end
   local rows = { header }
   -- Positions of ✓/✗ cells, recorded now (raw values) so they can be
   -- highlighted once from_structured_data has fixed each column's byte offsets.
   local bool_cells = {}
   for _, rec in ipairs(records) do
     local row = { rec.name }
-    for col_idx, label in ipairs(varying_labels) do
+    for col_idx, label in ipairs(labels) do
       local raw = M.field_value(rec, label)
       if raw == nil then
         row[#row + 1] = ""
@@ -238,10 +182,9 @@ local function render_table(buf, records)
   return widest
 end
 
---- Open a float with a shared-defaults header (when there's more than one
---- record) and a table of per-record fields for a group of generic records
---- (e.g. a Prometheus job's targets) — one row per record, even when there's
---- only one.
+--- Open a float with a table of per-record fields for a group of generic
+--- records (e.g. a Prometheus job's targets) — one row per record, one
+--- column per field.
 --- @param details    table      Bare array of GenericRecordDescription, as decoded
 ---                               from the server response
 --- @param title      string     Window title (caller derives from the request path)
