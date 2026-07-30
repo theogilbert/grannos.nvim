@@ -391,6 +391,37 @@ A table is covered by more than one `kind: "table"` region the same way: its nam
 
 ---
 
+### `explore.download`
+
+Fetches the full content of a node at the given path — e.g. an S3 object — for a client to load into a buffer. Unlike `explore.list`/`explore.describe`, results are never cached: every call re-fetches from the driver. Only supported by drivers that declare downloadable nodes; other drivers return an error.
+
+**params**
+
+| Field           | Type             | Description            |
+|-----------------|------------------|-------------------------|
+| `connection_id` | string           | Connection to query     |
+| `path`          | array of strings | Path to the node        |
+
+**result**
+
+| Field            | Type    | Description                                                              |
+|------------------|---------|----------------------------------------------------------------------------|
+| `content_base64` | string  | Full content, base64-encoded (content may be binary)                      |
+| `filename`       | string  | Suggested filename, e.g. the S3 object's key basename                     |
+| `content_type`   | string  | MIME type as reported by the driver, e.g. `"text/plain"`, `"application/octet-stream"` |
+| `size`           | integer | Size of the decoded content in bytes                                      |
+
+**example**
+
+```json
+{"id":8,"method":"explore.download","params":{"connection_id":"0","path":["my-bucket","logs","2024","access.log"]}}
+{"id":8,"result":{"content_base64":"SGVsbG8sIHdvcmxkIQ==","filename":"access.log","content_type":"text/plain","size":13},"error":null}
+```
+
+A driver should reject content above some size threshold with an error rather than inlining an arbitrarily large payload — clients loading the result into a Neovim buffer are not equipped to page a multi-gigabyte download.
+
+---
+
 ### `driver.help`
 
 Returns documentation for a specific driver as a markdown string. Clients should display this in a help buffer when the user requests driver-specific documentation.

@@ -2,14 +2,15 @@
 -- Navigation: <CR> expands/collapses nodes; hover_key (default K) describes the item under cursor.
 local M = {}
 
-local Buffer  = require("grannos.buffer")
-local client  = require("grannos.client")
-local config  = require("grannos.config")
-local hl      = require("grannos.hl")
-local pane    = require("grannos.ui.detail_pane")
-local results = require("grannos.ui.results")
-local window  = require("grannos.ui.window")
-local Spinner = require("grannos.ui.spinner")
+local Buffer         = require("grannos.buffer")
+local client         = require("grannos.client")
+local config         = require("grannos.config")
+local content_buffer = require("grannos.ui.content_buffer")
+local hl             = require("grannos.hl")
+local pane           = require("grannos.ui.detail_pane")
+local results        = require("grannos.ui.results")
+local window         = require("grannos.ui.window")
+local Spinner        = require("grannos.ui.spinner")
 
 local BUFNAME = "grannos://explorer"
 
@@ -36,6 +37,9 @@ local EXPLORER_HL = {
   constraint     = "GrannosExplorerConstraint",
   group          = "GrannosExplorerGroup",
   document       = "GrannosExplorerDocument",
+  bucket         = "GrannosExplorerDatabase",
+  prefix         = "GrannosExplorerSchema",
+  object         = "GrannosExplorerDocument",
 }
 
 local TYPE_ICONS = {
@@ -48,6 +52,9 @@ local TYPE_ICONS = {
   index          = "󰒻 ",
   constraint     = "󰌾 ",
   document       = "󰈙 ",
+  bucket         = "󰆼 ",
+  prefix         = "󱁳 ",
+  object         = "󰈙 ",
 }
 local GROUP_ICON = { closed = " ", open = " " }
 local FIELD_ICON = "󰠵 "
@@ -735,8 +742,9 @@ local function load_root(reset_cache)
   end)
 end
 
-local PREVIEWABLE_TYPES = { table = true, ["base table"] = true, view = true, collection = true }
-local DIAGRAM_TYPES     = { table = true, ["base table"] = true, view = true }
+local PREVIEWABLE_TYPES  = { table = true, ["base table"] = true, view = true, collection = true }
+local DIAGRAM_TYPES      = { table = true, ["base table"] = true, view = true }
+local DOWNLOADABLE_TYPES = { object = true }
 
 --- Handle the "D" keymap: request an ASCII diagram for the table under the cursor.
 local function on_diagram()
@@ -767,6 +775,26 @@ local function on_preview_rows()
         end
         local rows = type(result.rows) == "table" and result.rows or {}
         results.show_results(result.columns, rows, #rows, result.rows_total, result.duration_ms)
+      end)
+    end)
+end
+
+--- Handle the "d" keymap: download the full content of the node under the
+--- cursor into a scratch buffer (e.g. an S3 object). No-op for node types
+--- that don't support content download.
+local function on_download()
+  local line = vim.api.nvim_win_get_cursor(0)[1]
+  local node = node_at_line(line)
+  if not node or not DOWNLOADABLE_TYPES[node.type] then return end
+  vim.notify(("grannos: downloading %q…"):format(node.name), vim.log.levels.INFO)
+  client.request("explore.download", { connection_id = state.conn_id, path = node.path },
+    function(err, result)
+      vim.schedule(function()
+        if err then
+          vim.notify("grannos: " .. err, vim.log.levels.ERROR)
+          return
+        end
+        content_buffer.open(result.content_base64, result.filename, result.content_type)
       end)
     end)
 end
@@ -802,6 +830,8 @@ local function get_or_create_buffer()
     { nowait = true, silent = true, desc = "Preview rows" })
   state.buffer:set_keymap("n", "D", on_diagram,
     { nowait = true, silent = true, desc = "Show table diagram" })
+  state.buffer:set_keymap("n", "d", on_download,
+    { nowait = true, silent = true, desc = "Download content" })
   state.buffer:set_keymap("n", "q", function()
     local win = vim.fn.bufwinid(state.buffer.buf_id)
     if win ~= -1 then vim.api.nvim_win_close(win, true) end

@@ -45,6 +45,7 @@ grannos.nvim is a Neovim database-client plugin that delegates all database work
 | `lua/grannos/ui/relationship.lua` | Foreign-key relationship detail float, opened by hovering a diagram edge (uses detail_pane) |
 | `lua/grannos/ui/diagram.lua` | ASCII schema diagram viewer (new tab); tracks highlight regions for hover |
 | `lua/grannos/ui/hover.lua` | Generic non-focusable hover float near the cursor |
+| `lua/grannos/ui/content_buffer.lua` | Opens `explore.download` content (base64) in a scratch buffer; shared by the explorer and (later) results-pane LOB downloads |
 | `lua/grannos/ui/window.lua` | Sidebar window helper |
 | `lua/grannos/log.lua` | In-memory query log (per connection) |
 | `lua/grannos/selection.lua` | Visual selection extraction |
