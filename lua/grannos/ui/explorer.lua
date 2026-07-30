@@ -40,6 +40,7 @@ local EXPLORER_HL = {
   bucket         = "GrannosExplorerDatabase",
   prefix         = "GrannosExplorerSchema",
   object         = "GrannosExplorerDocument",
+  gridfs_bucket  = "GrannosExplorerCollection",
 }
 
 local TYPE_ICONS = {
@@ -55,6 +56,7 @@ local TYPE_ICONS = {
   bucket         = "󰆼 ",
   prefix         = "󱁳 ",
   object         = "󰈙 ",
+  gridfs_bucket  = "󱃗 ",
 }
 local GROUP_ICON = { closed = " ", open = " " }
 local FIELD_ICON = "󰠵 "
@@ -799,6 +801,33 @@ local function on_open_in_buffer()
     end)
 end
 
+--- Handle the "s" keymap: save the full content of the node under the cursor
+--- straight to a local file (prompted), without routing it through a buffer —
+--- the right choice for binary content, and for anything too large to
+--- comfortably hold in a Neovim buffer.
+local function on_save_to_disk()
+  local line = vim.api.nvim_win_get_cursor(0)[1]
+  local node = node_at_line(line)
+  if not node or not DOWNLOADABLE_TYPES[node.type] then return end
+  vim.ui.input({ prompt = "Save to: ", default = vim.fn.getcwd() .. "/" .. node.name, completion = "file" },
+    function(path)
+      if not path or path == "" then return end
+      local abs_path = vim.fn.fnamemodify(path, ":p")
+      vim.notify(("grannos: saving %q…"):format(abs_path), vim.log.levels.INFO)
+      client.request("explore.download",
+        { connection_id = state.conn_id, path = node.path, dest_path = abs_path },
+        function(err, result)
+          vim.schedule(function()
+            if err then
+              vim.notify("grannos: " .. err, vim.log.levels.ERROR)
+              return
+            end
+            vim.notify(("grannos: saved %d bytes to %q"):format(result.size, result.written_to), vim.log.levels.INFO)
+          end)
+        end)
+    end)
+end
+
 --- Create the explorer Buffer (with keymaps) if it doesn't exist or has been wiped.
 local function get_or_create_buffer()
   if state.buffer and state.buffer:is_valid() then return end
@@ -832,6 +861,8 @@ local function get_or_create_buffer()
     { nowait = true, silent = true, desc = "Show table diagram" })
   state.buffer:set_keymap("n", "o", on_open_in_buffer,
     { nowait = true, silent = true, desc = "Open content in buffer" })
+  state.buffer:set_keymap("n", "s", on_save_to_disk,
+    { nowait = true, silent = true, desc = "Save content to disk" })
   state.buffer:set_keymap("n", "q", function()
     local win = vim.fn.bufwinid(state.buffer.buf_id)
     if win ~= -1 then vim.api.nvim_win_close(win, true) end

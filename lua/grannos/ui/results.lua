@@ -8,16 +8,17 @@
 -- listed so the user can still :b back to it.
 -- Buffers are listed so the user can :b between them.
 -- One results window per tab: running a query in tab A never clobbers tab B.
-local Buffer      = require("grannos.buffer")
-local table_fmt   = require("grannos.table")
-local hl          = require("grannos.hl")
-local config      = require("grannos.config")
-local col_picker  = require("grannos.ui.col_picker")
-local connections = require("grannos.connections")
-local export      = require("grannos.export")
-local client      = require("grannos.client")
-local hover       = require("grannos.ui.hover")
-local column_ui   = require("grannos.ui.column")
+local Buffer         = require("grannos.buffer")
+local table_fmt      = require("grannos.table")
+local hl             = require("grannos.hl")
+local config         = require("grannos.config")
+local col_picker     = require("grannos.ui.col_picker")
+local connections    = require("grannos.connections")
+local export         = require("grannos.export")
+local client         = require("grannos.client")
+local content_buffer = require("grannos.ui.content_buffer")
+local hover          = require("grannos.ui.hover")
+local column_ui      = require("grannos.ui.column")
 
 local M = {}
 
@@ -443,6 +444,91 @@ export_results = function(buf_state)
   end)
 end
 
+--- Return the raw LobPlaceholder cell under the cursor, or nil when the cursor
+--- isn't on a LOB cell. `table_data.lines` holds raw cell values (in the
+--- currently-rendered page and visible-column order) at the same 0-indexed
+--- buffer-line numbering `table.lua`'s *_hl_rules functions use internally —
+--- see their "data row i maps to 0-indexed buffer line i" comment. The table
+--- always starts at absolute buffer line 2 (row-count label, blank line, then
+--- the table itself — see render_table's `content = { label, "" }`).
+--- @param buf_state table
+--- @return table|nil
+local function lob_cell_at_cursor(buf_state)
+  local tbl = buf_state.table_data
+  if not tbl then return nil end
+  local buf_line  = vim.api.nvim_win_get_cursor(0)[1] - 1  -- 0-indexed
+  local data_line = buf_line - 2
+  local row       = tbl.lines[data_line]
+  if not row then return nil end
+  local col_idx = table_fmt.get_column_at_cursor(tbl.columns_width, vim.fn.virtcol("."))
+  local cell     = col_idx and row[col_idx]
+  if type(cell) == "table" and cell.type == "lob" then return cell end
+  return nil
+end
+
+--- Return the download ref for the LOB cell under the cursor, notifying and
+--- returning nil when there's no LOB cell there or the driver didn't attach a
+--- ref (some LOB values can't be safely re-fetched later — e.g. Oracle's LOB
+--- locator, which crashes the process if read after its cursor closes; see
+--- docs/protocol.md's LobPlaceholder).
+--- @param buf_state table
+--- @return string|nil
+local function lob_ref_at_cursor(buf_state)
+  local cell = lob_cell_at_cursor(buf_state)
+  if not cell then return nil end
+  if not cell.ref then
+    vim.notify("grannos: this value can't be downloaded again — re-run the query and use it before the connection moves on", vim.log.levels.WARN)
+    return nil
+  end
+  return cell.ref
+end
+
+--- Handle the "o" keymap in the results pane: open the LOB cell under the
+--- cursor's full content in a scratch buffer.
+--- @param buf_state table
+local function on_open_lob_in_buffer(buf_state)
+  local ref = lob_ref_at_cursor(buf_state)
+  if not ref then return end
+  local conn = buf_state.conn_key and require("grannos").get_conn(buf_state.conn_key)
+  if not conn then return end
+  vim.notify("grannos: downloading…", vim.log.levels.INFO)
+  client.request("explore.download", { connection_id = conn.conn_id, ref = ref }, function(err, result)
+    vim.schedule(function()
+      if err then
+        vim.notify("grannos: " .. err, vim.log.levels.ERROR)
+        return
+      end
+      content_buffer.open(result.content_base64, result.filename, result.content_type)
+    end)
+  end)
+end
+
+--- Handle the "s" keymap in the results pane: save the LOB cell under the
+--- cursor's full content straight to a local file (prompted), without ever
+--- routing it through this buffer — the right choice for binary content.
+--- @param buf_state table
+local function on_save_lob_to_disk(buf_state)
+  local ref = lob_ref_at_cursor(buf_state)
+  if not ref then return end
+  local conn = buf_state.conn_key and require("grannos").get_conn(buf_state.conn_key)
+  if not conn then return end
+  vim.ui.input({ prompt = "Save to: ", default = vim.fn.getcwd() .. "/", completion = "file" }, function(path)
+    if not path or path == "" then return end
+    local abs_path = vim.fn.fnamemodify(path, ":p")
+    vim.notify(("grannos: saving to %q…"):format(abs_path), vim.log.levels.INFO)
+    client.request("explore.download", { connection_id = conn.conn_id, ref = ref, dest_path = abs_path },
+      function(err, result)
+        vim.schedule(function()
+          if err then
+            vim.notify("grannos: " .. err, vim.log.levels.ERROR)
+            return
+          end
+          vim.notify(("grannos: saved %d bytes to %q"):format(result.size, result.written_to), vim.log.levels.INFO)
+        end)
+      end)
+  end)
+end
+
 --- Show a condensed column-description hover float for the column under the cursor.
 --- Only available when the current results came from an explorer table preview
 --- (`buf_state.table_path` set); a no-op otherwise, since arbitrary query results have
@@ -547,6 +633,10 @@ local function get_or_create_buf_state(buf_key, buf_title)
     { desc = "Show column info", silent = true })
   buf:set_keymap("n", "t", function() toggle_thousands_separator(buf_state) end,
     { desc = "Toggle thousands separator for column", silent = true })
+  buf:set_keymap("n", "o", function() on_open_lob_in_buffer(buf_state) end,
+    { desc = "Open LOB cell in buffer", silent = true })
+  buf:set_keymap("n", "s", function() on_save_lob_to_disk(buf_state) end,
+    { desc = "Save LOB cell to disk", silent = true })
   return buf_state
 end
 

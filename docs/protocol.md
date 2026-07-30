@@ -393,32 +393,42 @@ A table is covered by more than one `kind: "table"` region the same way: its nam
 
 ### `explore.download`
 
-Fetches the full content of a node at the given path — e.g. an S3 object — for a client to load into a buffer. Unlike `explore.list`/`explore.describe`, results are never cached: every call re-fetches from the driver. Only supported by drivers that declare downloadable nodes; other drivers return an error.
+Fetches the full content of a node — e.g. an S3 object, a GridFS file, or a LOB cell from a previous `execute` result — for a client to either load into a buffer or have written straight to a local file. Unlike `explore.list`/`explore.describe`, results are never cached: every call re-fetches from the driver.
 
 **params**
 
-| Field           | Type             | Description            |
-|-----------------|------------------|-------------------------|
-| `connection_id` | string           | Connection to query     |
-| `path`          | array of strings | Path to the node        |
+| Field           | Type             | Description                                                                 |
+|-----------------|------------------|-------------------------------------------------------------------------------|
+| `connection_id` | string           | Connection to query                                                          |
+| `path`          | array of strings (optional) | Path to a tree node (e.g. an S3 object or GridFS file). Exactly one of `path`/`ref` must be given. |
+| `ref`           | string (optional) | A [LobPlaceholder](#lobplaceholder)'s `ref` value, for downloading a LOB cell from an earlier result row. Exactly one of `path`/`ref` must be given. |
+| `dest_path`     | string (optional) | Local filesystem path. When given, the driver writes content directly to this path — the backend is always a local subprocess (spawned by the client, no network hop), so this needs no round trip through the client. When omitted, content comes back inline as `content_base64`. |
 
 **result**
 
 | Field            | Type    | Description                                                              |
 |------------------|---------|----------------------------------------------------------------------------|
-| `content_base64` | string  | Full content, base64-encoded (content may be binary)                      |
+| `content_base64` | string or null | Full content, base64-encoded (content may be binary). Set when `dest_path` was omitted; null otherwise. |
+| `written_to`     | string or null | Echoes `dest_path`. Set when `dest_path` was given; null otherwise.  |
 | `filename`       | string  | Suggested filename, e.g. the S3 object's key basename                     |
 | `content_type`   | string  | MIME type as reported by the driver, e.g. `"text/plain"`, `"application/octet-stream"` |
-| `size`           | integer | Size of the decoded content in bytes                                      |
+| `size`           | integer | Size of the content in bytes                                              |
 
-**example**
+Exactly one of `content_base64`/`written_to` is non-null in any response, matching whether the request carried `dest_path`.
+
+**examples**
 
 ```json
 {"id":8,"method":"explore.download","params":{"connection_id":"0","path":["my-bucket","logs","2024","access.log"]}}
-{"id":8,"result":{"content_base64":"SGVsbG8sIHdvcmxkIQ==","filename":"access.log","content_type":"text/plain","size":13},"error":null}
+{"id":8,"result":{"content_base64":"SGVsbG8sIHdvcmxkIQ==","written_to":null,"filename":"access.log","content_type":"text/plain","size":13},"error":null}
 ```
 
-A driver should reject content above some size threshold with an error rather than inlining an arbitrarily large payload — clients loading the result into a Neovim buffer are not equipped to page a multi-gigabyte download.
+```json
+{"id":9,"method":"explore.download","params":{"connection_id":"0","ref":"3f2a1c9e...","dest_path":"/home/user/downloads/report.pdf"}}
+{"id":9,"result":{"content_base64":null,"written_to":"/home/user/downloads/report.pdf","filename":"report.pdf","content_type":"application/pdf","size":483920},"error":null}
+```
+
+A driver returning `content_base64` (no `dest_path`) should reject content above some size threshold with an error rather than inlining an arbitrarily large payload — clients loading the result into a Neovim buffer are not equipped to page a multi-gigabyte download. No such limit applies when `dest_path` is given, since content is streamed to disk rather than held in memory as a whole.
 
 ---
 
@@ -718,13 +728,18 @@ not to inline the full value into the result set. Tagging the value with an obje
 returning a formatted string like `"CLOB (3423 chars)"` — lets clients distinguish it from a real
 string value on the wire, instead of pattern-matching cell contents.
 
-| Field  | Type   | Description                                                              |
-|--------|--------|---------------------------------------------------------------------------|
-| `type` | string | Always `"lob"` — discriminates this value from a plain string cell       |
-| `text` | string | Server-formatted placeholder text to display (e.g. `"CLOB (3423 chars)"`) |
+| Field  | Type           | Description                                                              |
+|--------|----------------|---------------------------------------------------------------------------|
+| `type` | string         | Always `"lob"` — discriminates this value from a plain string cell       |
+| `text` | string         | Server-formatted placeholder text to display (e.g. `"CLOB (3423 chars)"`) |
+| `ref`  | string or null | Opaque token a client can pass as [`explore.download`](#exploredownload)'s `ref` param to fetch this cell's full content later, without re-running the query. Null when the driver can't support re-fetching it (e.g. a LOB locator that becomes invalid once its cursor closes) — the cell is then purely informational. |
 
 ```json
-{"type": "lob", "text": "CLOB (3423 chars)"}
+{"type": "lob", "text": "CLOB (3423 chars)", "ref": "3f2a1c9e8b7d4f6a9c0e1b2d3a4f5e6c"}
+```
+
+```json
+{"type": "lob", "text": "CLOB (3423 chars)", "ref": null}
 ```
 
 ---
