@@ -744,7 +744,7 @@ local function load_root(reset_cache)
   end)
 end
 
-local PREVIEWABLE_TYPES  = { table = true, ["base table"] = true, view = true, collection = true }
+local PREVIEWABLE_TYPES  = { table = true, ["base table"] = true, view = true, collection = true, metric = true }
 local DIAGRAM_TYPES      = { table = true, ["base table"] = true, view = true }
 local DOWNLOADABLE_TYPES = { object = true }
 
