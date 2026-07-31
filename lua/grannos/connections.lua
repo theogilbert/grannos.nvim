@@ -66,19 +66,6 @@ local function jval(v, default)
   return v
 end
 
---- If `params.requires_password` is set, prompt the user and inject the password.
---- Calls `callback(params_with_pw)` on success, or `callback(nil)` on cancel.
---- @param params   table
---- @param callback fun(params: table|nil)
-local function prompt_password(params, callback)
-  if not params.requires_password then callback(params) return end
-  vim.ui.input({ prompt = "Password: ", secret = true }, function(val)
-    if val == nil then callback(nil) return end
-    callback(vim.tbl_extend("force", params, { password = val }))
-  end)
-end
-M.prompt_password = prompt_password
-
 --- Return the path to the connections JSON file.
 --- @return string
 local function file_path() return config.options.connections_file end
@@ -254,6 +241,25 @@ local function driver_fields(caps, driver)
   end
   return {}, nil
 end
+
+--- If `params.requires_password` is set, prompt the user and inject the password
+--- under the driver's secret param key (e.g. `password`, or `secret_access_key`
+--- for S3) so it lands where the backend driver expects it.
+--- Calls `callback(params_with_pw)` on success, or `callback(nil)` on cancel.
+--- @param caps     table
+--- @param driver   string
+--- @param params   table
+--- @param callback fun(params: table|nil)
+local function prompt_password(caps, driver, params, callback)
+  if not params.requires_password then callback(params) return end
+  local _, pw_param = driver_fields(caps, driver)
+  local pw_key = pw_param and pw_param.key or "password"
+  vim.ui.input({ prompt = "Password: ", secret = true }, function(val)
+    if val == nil then callback(nil) return end
+    callback(vim.tbl_extend("force", params, { [pw_key] = val }))
+  end)
+end
+M.prompt_password = prompt_password
 
 --- Return whether `driver` can express write operations (capabilities'
 --- `supports_writes`), so the form can skip write-related settings (e.g.
@@ -464,7 +470,7 @@ local function make_password_fields(pw_param, had_value)
   local PW_MASK = "********"
   local raw, edited = "", false
   local pw_field = {
-    key          = "password",
+    key          = pw_param.key,
     label        = pw_param.label,
     kind         = "secret",
     get          = function() return { edited = edited and raw ~= "", raw = raw } end,
@@ -484,20 +490,24 @@ end
 --- same way a submit would: an edited, non-empty password field wins, and an
 --- unedited one falls back to `current`'s already-stored password (nil for
 --- create, where an unedited/empty password just means "no password").
---- @param dfields table[]     driver param descriptors (excludes the secret one)
---- @param values  table       raw values gathered from the form
---- @param current table|nil   existing connection params, for password fallback
+--- @param dfields  table[]     driver param descriptors (excludes the secret one)
+--- @param pw_param table|nil   the secret field descriptor (or nil)
+--- @param values   table       raw values gathered from the form
+--- @param current  table|nil   existing connection params, for password fallback
 --- @return table
-local function build_connect_params(dfields, values, current)
+local function build_connect_params(dfields, pw_param, values, current)
   local params = {}
   for _, p in ipairs(dfields) do params[p.key] = values[p.key] end
   coerce_integer_fields(dfields, params)
 
-  local pw_result = values.password or { edited = false, raw = "" }
-  local current_pw = current and current.password
-  if current_pw == vim.NIL then current_pw = nil end
-  local pw = (pw_result.edited and pw_result.raw ~= "") and pw_result.raw or current_pw
-  if pw and pw ~= "" then params.password = pw end
+  if pw_param then
+    local pw_key = pw_param.key
+    local pw_result = values[pw_key] or { edited = false, raw = "" }
+    local current_pw = current and current[pw_key]
+    if current_pw == vim.NIL then current_pw = nil end
+    local pw = (pw_result.edited and pw_result.raw ~= "") and pw_result.raw or current_pw
+    if pw and pw ~= "" then params[pw_key] = pw end
+  end
   return params
 end
 
@@ -623,7 +633,7 @@ function M.pick(caps, active_set, filetype, callback)
         M.create(caps, callback, { driver = driver_id, group = group })
         return
       end
-      prompt_password(choice.params, function(params)
+      prompt_password(caps, driver_id, choice.params, function(params)
         if not params then callback(nil) return end
         callback(choice.key, params)
       end)
@@ -674,7 +684,7 @@ function M.pick(caps, active_set, filetype, callback)
       }, function(choice)
         if not choice then callback(nil) return end
         if not choice.params then M.create(caps, callback, { driver = driver_id }) return end
-        prompt_password(choice.params, function(params)
+        prompt_password(caps, driver_id, choice.params, function(params)
           if not params then callback(nil) return end
           callback(choice.key, params)
         end)
@@ -772,7 +782,7 @@ function M.create(caps, callback, defaults)
       fields    = fields,
       on_cancel = function() callback(nil) end,
       on_test   = function(values, done)
-        test_connect(driver, build_connect_params(dfields, values, nil), done)
+        test_connect(driver, build_connect_params(dfields, pw_param, values, nil), done)
       end,
       on_submit = function(values, done)
         local name  = values.name
@@ -787,10 +797,11 @@ function M.create(caps, callback, defaults)
         for _, p in ipairs(dfields) do params[p.key] = values[p.key] end
         coerce_integer_fields(dfields, params)
 
-        local pw_result = values.password or { edited = false, raw = "" }
+        local pw_key    = pw_param and pw_param.key
+        local pw_result = (pw_key and values[pw_key]) or { edited = false, raw = "" }
         local pw = (pw_result.edited and pw_result.raw ~= "") and pw_result.raw or nil
         if pw and values.remember_password then
-          params.password          = pw
+          params[pw_key]            = pw
           params.requires_password = false
         else
           params.requires_password = pw ~= nil and pw ~= ""
@@ -803,7 +814,7 @@ function M.create(caps, callback, defaults)
         write_data(data2)
         vim.notify(("grannos: saved %q"):format(name), vim.log.levels.INFO)
         local out = (pw ~= nil and pw ~= "")
-          and vim.tbl_extend("force", params, { password = pw }) or params
+          and vim.tbl_extend("force", params, { [pw_key] = pw }) or params
         done(nil)
         callback(key, out)
       end,
@@ -843,7 +854,9 @@ function M.edit(key, caps, callback)
 
   local driver_label  = resolve_driver_label(caps, server, driver)
   local dfields, pw_param = driver_fields(caps, driver)
-  local had_password  = (current.password ~= nil and current.password ~= vim.NIL) or current.requires_password
+  local pw_key = pw_param and pw_param.key
+  local had_password = (pw_key and current[pw_key] ~= nil and current[pw_key] ~= vim.NIL)
+    or current.requires_password
 
   local fields = { make_name_field(name), make_group_field(server, driver, group) }
   for _, p in ipairs(dfields) do table.insert(fields, driver_param_field(p, current)) end
@@ -857,7 +870,7 @@ function M.edit(key, caps, callback)
     fields    = fields,
     on_cancel = function() callback(nil) end,
     on_test   = function(values, done)
-      test_connect(driver, build_connect_params(dfields, values, current), done)
+      test_connect(driver, build_connect_params(dfields, pw_param, values, current), done)
     end,
     on_submit = function(values, done)
       local new_name  = values.name
@@ -873,21 +886,21 @@ function M.edit(key, caps, callback)
       coerce_integer_fields(dfields, params)
       params.allow_writes = values.allow_writes and true or nil
 
-      local pw_result = values.password or { edited = false, raw = "" }
+      local pw_result = (pw_key and values[pw_key]) or { edited = false, raw = "" }
       local pw = (pw_result.edited and pw_result.raw ~= "") and pw_result.raw or nil
       if pw then
         if values.remember_password then
-          params.password = pw; params.requires_password = false
+          params[pw_key] = pw; params.requires_password = false
         else
           params.requires_password = true
         end
       else
-        if current.password then
-          params.password = current.password; params.requires_password = false
+        if pw_key and current[pw_key] then
+          params[pw_key] = current[pw_key]; params.requires_password = false
         else
           params.requires_password = current.requires_password
         end
-        pw = current.password
+        pw = pw_key and current[pw_key]
       end
 
       local data2 = read_data()
@@ -900,7 +913,7 @@ function M.edit(key, caps, callback)
       write_data(data2)
       vim.notify(("grannos: saved %q"):format(new_name), vim.log.levels.INFO)
       local final = (pw ~= nil and pw ~= "")
-        and vim.tbl_extend("force", params, { password = pw }) or params
+        and vim.tbl_extend("force", params, { [pw_key] = pw }) or params
       done(nil)
       callback(new_key, final)
     end,
@@ -925,7 +938,9 @@ function M.clone(source_key, new_name, caps, callback)
 
   local driver_label  = resolve_driver_label(caps, server, driver)
   local dfields, pw_param = driver_fields(caps, driver)
-  local had_password  = (current.password ~= nil and current.password ~= vim.NIL) or current.requires_password
+  local pw_key = pw_param and pw_param.key
+  local had_password = (pw_key and current[pw_key] ~= nil and current[pw_key] ~= vim.NIL)
+    or current.requires_password
 
   local fields = { make_name_field(new_name), make_group_field(server, driver, group) }
   for _, p in ipairs(dfields) do table.insert(fields, driver_param_field(p, current)) end
@@ -936,7 +951,7 @@ function M.clone(source_key, new_name, caps, callback)
     fields    = fields,
     on_cancel = function() callback(nil) end,
     on_test   = function(values, done)
-      test_connect(driver, build_connect_params(dfields, values, current), done)
+      test_connect(driver, build_connect_params(dfields, pw_param, values, current), done)
     end,
     on_submit = function(values, done)
       local name      = values.name
@@ -955,21 +970,21 @@ function M.clone(source_key, new_name, caps, callback)
       for _, p in ipairs(dfields) do params[p.key] = values[p.key] end
       coerce_integer_fields(dfields, params)
 
-      local pw_result = values.password or { edited = false, raw = "" }
+      local pw_result = (pw_key and values[pw_key]) or { edited = false, raw = "" }
       local pw = (pw_result.edited and pw_result.raw ~= "") and pw_result.raw or nil
       if pw then
         if values.remember_password then
-          params.password = pw; params.requires_password = false
+          params[pw_key] = pw; params.requires_password = false
         else
           params.requires_password = true
         end
       else
-        if current.password then
-          params.password = current.password; params.requires_password = false
+        if pw_key and current[pw_key] then
+          params[pw_key] = current[pw_key]; params.requires_password = false
         else
           params.requires_password = current.requires_password
         end
-        pw = current.password
+        pw = pw_key and current[pw_key]
       end
 
       local data2 = read_data()
@@ -978,7 +993,7 @@ function M.clone(source_key, new_name, caps, callback)
       write_data(data2)
       vim.notify(("grannos: saved %q"):format(name), vim.log.levels.INFO)
       local final = (pw ~= nil and pw ~= "")
-        and vim.tbl_extend("force", params, { password = pw }) or params
+        and vim.tbl_extend("force", params, { [pw_key] = pw }) or params
       done(nil)
       callback(new_key, final)
     end,

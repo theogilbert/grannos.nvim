@@ -444,12 +444,14 @@ local function on_hover()
 
   local _, driver = connections.conn_parts(entry.key)
   local labels = {}
+  local secret_key
   local caps = require("grannos.client").capabilities()
   if caps then
     for _, d in ipairs(caps.drivers or {}) do
       if d.driver == driver then
         for _, p in ipairs(d.params or {}) do
           if p.key and p.label then labels[p.key] = p.label end
+          if p.secret then secret_key = p.key end
         end
         break
       end
@@ -458,7 +460,7 @@ local function on_hover()
 
   local keys = {}
   for k in pairs(params) do
-    if not HIDDEN_CONN_FIELDS[k] then table.insert(keys, k) end
+    if not HIDDEN_CONN_FIELDS[k] and k ~= secret_key then table.insert(keys, k) end
   end
   table.sort(keys)
 

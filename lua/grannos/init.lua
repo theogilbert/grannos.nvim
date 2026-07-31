@@ -178,9 +178,12 @@ function M.attach(name)
       vim.notify(("grannos: connection %q not found"):format(name), vim.log.levels.ERROR)
       return
     end
-    connections.prompt_password(params, function(params_with_pw)
-      if not params_with_pw then return end
-      M._do_connect(resolved_key, params_with_pw, after_connect)
+    M.ensure_backend_with_caps(function(caps)
+      local _, driver = connections.conn_parts(resolved_key)
+      connections.prompt_password(caps, driver, params, function(params_with_pw)
+        if not params_with_pw then return end
+        M._do_connect(resolved_key, params_with_pw, after_connect)
+      end)
     end)
   else
     local ft = vim.bo[bufnr].filetype
@@ -810,9 +813,12 @@ function M.ensure_connected(conn_key, callback)
     vim.notify(("grannos: connection %q not found"):format(conn_key), vim.log.levels.ERROR)
     return
   end
-  connections.prompt_password(params, function(params_with_pw)
-    if not params_with_pw then return end
-    M._do_connect(conn_key, params_with_pw, callback)
+  M.ensure_backend_with_caps(function(caps)
+    local _, driver = connections.conn_parts(conn_key)
+    connections.prompt_password(caps, driver, params, function(params_with_pw)
+      if not params_with_pw then return end
+      M._do_connect(conn_key, params_with_pw, callback)
+    end)
   end)
 end
 
