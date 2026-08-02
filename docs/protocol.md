@@ -299,7 +299,7 @@ A field's own detail — samples, comments, index membership, FK references — 
 
 ### `explore.preview`
 
-Returns a sample of up to 10 rows from the node at the given path. Only supported for table, view, and collection nodes; returns null fields for unsupported node types.
+Returns a sample of up to 10 rows from the node at the given path. Only supported for table, view, collection, and GridFS bucket nodes; returns null fields for unsupported node types.
 
 **params**
 
