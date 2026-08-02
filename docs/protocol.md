@@ -275,6 +275,26 @@ Returns the children of a node in the database object tree. The tree is navigate
 
 ---
 
+### `explore.find`
+
+Returns exploration nodes matching search criterias.
+
+**params**
+
+| Field           | Type             | Description                                                  |
+|-----------------|------------------|--------------------------------------------------------------|
+| `connection_id` | string           | Connection to query                                          |
+| `type`          | string           | Node kind (e.g. `"schema"`, `"table"`, `"group"`, `"index"`) |
+| `name`          | string           | Display name of the node                                     |
+
+**result**
+
+| Field     | Type                       | Description                 |
+|-----------|----------------------------|-----------------------------|
+| `paths`   | array of array of strings  | Paths to the node candidates |
+
+---
+
 ### `explore.describe`
 
 Returns detailed metadata about a specific node.
