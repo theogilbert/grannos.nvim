@@ -909,29 +909,6 @@ function M.open(conn_id, conn_name, driver, conn_key, driver_label)
   end
 end
 
---- Return the names of the already-fetched children at `path` for `conn_id`,
---- or nil when that path hasn't been expanded in the sidebar (including when
---- the sidebar is currently showing a different connection). Read-only —
---- never triggers a fetch of its own, so callers can use it as a cheap,
---- best-effort lookup into whatever the user has already browsed.
---- @param conn_id any
---- @param path    string[]  empty for the root (schema) list
---- @return string[]|nil
-function M.cached_child_names(conn_id, path)
-  if conn_id ~= state.conn_id then return nil end
-  local children
-  if #path == 0 then
-    children = #state.tree > 0 and state.tree or nil
-  else
-    local node = node_at_path(path)
-    children = node and node.children
-  end
-  if not children then return nil end
-  local names = {}
-  for _, n in ipairs(children) do table.insert(names, n.name) end
-  return names
-end
-
 --- Clear the explorer tree and stop the spinner (called on backend teardown).
 function M.reset()
   state.tree         = {}

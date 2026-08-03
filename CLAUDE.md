@@ -10,9 +10,11 @@ Tests use [plenary.nvim](https://github.com/nvim-lua/plenary.nvim). Run a single
 :PlenaryBustedFile spec/connections_spec.lua
 ```
 
-To run the suite headlessly from the CLI (no Neovim UI needed), use the `test` skill (`/test`), which locates plenary.nvim's install dir and drives `PlenaryBustedDirectory`/`PlenaryBustedFile` with `nvim --headless -u NONE`.
+To run the suite headlessly from the CLI (no Neovim UI needed): `make ci`, or the `test` skill (`/test`) for a single spec file.
 
-There is no build step for the Lua code. The precompiled treesitter parsers (`parser/sql.so`, `parser/cypher.so`) are binary and should not be regenerated manually.
+Both go through `spec/minimal_init.lua`, which prepends this working tree to the runtimepath. That matters: an installed copy of grannos.nvim under `site/pack` otherwise sits ahead of the working tree in the child processes plenary spawns, and a spec run silently resolves some modules from each. Never run the specs without it.
+
+There is no build step for the Lua code. The precompiled treesitter parsers (`parser/sql.so`, `parser/cypher.so`, `parser/promql.so`) are binary and should not be regenerated manually.
 
 ## Architecture
 
@@ -50,10 +52,28 @@ grannos.nvim is a Neovim database-client plugin that delegates all database work
 | `lua/grannos/log.lua` | In-memory query log (per connection) |
 | `lua/grannos/selection.lua` | Visual selection extraction |
 | `lua/grannos/ts_queries.lua` | Treesitter helpers: statement at cursor, statements in range |
+| `lua/grannos/symbols/` | Per-language extraction of the symbol under the cursor into an `explore.find` query |
 | `lua/grannos/hl.lua` | Highlight group definitions |
 | `lua/grannos/table.lua` | Column-aligned table rendering for results |
 | `lua/grannos/queries.lua` | Saved-queries filesystem helpers |
 | `lua/grannos/export.lua` | Pure serializers for exporting query results (json/csv/pretty/markdown) |
+
+### Resolving the symbol under the cursor
+
+`symbols.at_cursor` is **purely syntactic**: it reports what the symbol is called, what kind of node it names, and every ancestor the query text pins down. It never decides which database node that is — it emits an `explore.find` query and the backend resolves it, since only the backend knows what exists, where each driver keeps each kind of node, and how the catalog cases its identifiers.
+
+One extractor per treesitter language, in `lua/grannos/symbols/`, dispatched on `parser:lang()`:
+
+| Language | Symbols it names | Scopes it can infer |
+|----------|------------------|---------------------|
+| `sql` | table, column | the schema a reference is qualified with; the table an alias binds to; every FROM/JOIN source a bare column could belong to |
+| `cypher` | label, relationship_type, property | the label(s) or relationship type a variable's pattern binds it to |
+| `promql` | metric, label, job | the metric a label sits under, including across an aggregation modifier |
+| `json` | collection, database, field | the collection an operation names, and its database — MongoDB queries are Extended JSON, so they parse as `json` rather than a language of their own |
+
+A language absent from that table simply never resolves, which is the same outcome as a cursor on a keyword. Adding one means adding a module with an `extract(node, bufnr)` function and registering it in `symbols/init.lua`; nothing else changes, because the backend already knows where every kind of node lives.
+
+Do not reintroduce client-side resolution against the explorer's cached tree. It was removed because it could only ever see what the user had already expanded in the sidebar, so the same hover resolved or didn't depending on unrelated browsing history.
 
 ### Session state and connection identity
 

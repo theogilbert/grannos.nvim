@@ -284,14 +284,24 @@ Returns exploration nodes matching search criterias.
 | Field           | Type             | Description                                                  |
 |-----------------|------------------|--------------------------------------------------------------|
 | `connection_id` | string           | Connection to query                                          |
-| `type`          | string           | Node kind (e.g. `"schema"`, `"table"`, `"group"`, `"index"`) |
-| `name`          | string           | Display name of the node                                     |
+| `type`          | string           | Node kind being searched for; see [the node-kind vocabulary](#exploreitem) |
+| `name`          | string           | Display name of the node, matched case-insensitively         |
+| `scope`         | List of [SearchScope](#searchscope) | Defines the scopes in which to search for the node. Optional; an empty list searches the whole tree |
 
 **result**
 
 | Field     | Type                       | Description                 |
 |-----------|----------------------------|-----------------------------|
 | `paths`   | array of array of strings  | Paths to the node candidates |
+
+Each path is ready to pass straight back to [`explore.describe`](#exploredescribe) — including its segment casing, which is the catalog's own and so may differ from the `name` that was searched for. An empty array means the symbol names nothing; more than one entry means it is ambiguous, and choosing between them is the client's call. A search left so unscoped that resolving it would mean walking a large part of the tree fails with an error asking for a narrower scope, rather than returning partial results.
+
+**example**
+
+```json
+{"id":4,"method":"explore.find","params":{"connection_id":"0","type":"column","name":"id","scope":[{"name":"users","type":"table"},{"name":"orders","type":"table"}]}}
+{"id":4,"result":{"paths":[["public","orders","columns","id"],["public","users","columns","id"]]},"error":null}
+```
 
 ---
 
@@ -589,6 +599,33 @@ Each item returned by `explore.list` has this shape:
 | `expandable` | boolean | Whether the node has children                    |
 
 The `"group"` type is used for intermediate organisational nodes that bundle sub-categories (e.g. `columns`, `indices`). These nodes are not database objects themselves.
+
+Node kinds come from one vocabulary shared across every driver — the same values are used by `explore.list`'s `type`, `explore.find`'s `type` param, and [SearchScope](#searchscope)'s `type`. A driver uses only the subset its own tree contains:
+
+| Group | Values |
+|-------|--------|
+| Organisational | `group` |
+| Containers | `schema`, `database` |
+| Entities | `table`, `view`, `collection`, `label`, `relationship_type` |
+| Fields | `column`, `field`, `property` |
+| Access paths | `index`, `foreign_key`, `alias` |
+| Storage | `gridfs_bucket`, `bucket`, `prefix`, `object` |
+| Metrics | `metric`, `job`, `configuration`, `settings` |
+
+Two caveats. First, `explore.list` overloads `type` on leaf field nodes, reporting the field's *data* type there (`"int4"`, `"varchar2"`, `"text"`) rather than `"column"`, so a client can show it beside the name — so `type` is only drawn from this vocabulary for structural nodes. Second, nothing distinguishes a table from a view at the level they share, so `explore.find` treats `"table"` and `"view"` as the same request; a client reading a `FROM` clause can send either.
+
+---
+
+## SearchScope
+
+Additional restriction to target the search. A scope names an *ancestor* the matched node must sit under.
+
+Scopes sharing a `type` are alternatives — the node may sit under any one of them — while scopes of different types must all hold. So searching for a column with scopes `[{users, table}, {orders, table}, {public, schema}]` looks under `public.users` and `public.orders`: exactly what an unqualified column across a join needs. A scope whose `type` names no level of the driver's tree is ignored rather than failing the search, since a client infers scopes from query text and cannot know each driver's shape.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name`       | string  | Display name of the node, matched case-insensitively |
+| `type`       | string  | Node kind, from the vocabulary above (e.g. `"schema"`, `"table"`, `"label"`) |
 
 ---
 

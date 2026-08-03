@@ -11,6 +11,7 @@ local connections_panel = require("grannos.ui.connections")
 local selection         = require("grannos.selection")
 local gutter            = require("grannos.ui.gutter")
 local ts_queries        = require("grannos.ts_queries")
+local symbols           = require("grannos.symbols")
 local log               = require("grannos.log")
 local hover             = require("grannos.ui.hover")
 
@@ -624,32 +625,8 @@ end
 
 local render_query_info  -- forward declaration; defined below show_query_info
 
---- Return the schema names among the explorer's cached (already-browsed)
---- schema list whose own cached table list contains `table_name`. Never
---- fetches — only ever sees what the user has already expanded in the
---- sidebar for this connection, so it commonly returns {}.
---- @param conn_id any
---- @param table_name string
---- @return string[]
-local function cached_schemas_containing(conn_id, table_name)
-  local schemas = explorer.cached_child_names(conn_id, {})
-  if not schemas then return {} end
-  local matches = {}
-  for _, schema in ipairs(schemas) do
-    local tables = explorer.cached_child_names(conn_id, { schema })
-    if tables and vim.tbl_contains(tables, table_name) then
-      table.insert(matches, schema)
-    end
-  end
-  return matches
-end
-
---- Describe the table/column named by `path` (see ts_queries.symbol_at_cursor)
---- in a float — the same dispatch diagram.lua uses for hovering diagram regions.
---- When `path` doesn't resolve and its first segment is a bare table name
---- (no schema — the common case, since SQL rarely spells one out), retries
---- once with a schema prepended, but only when the explorer's cache narrows
---- it to exactly one candidate schema.
+--- Describe the node at `path` in a float — the same dispatch diagram.lua uses
+--- for hovering diagram regions.
 --- @param conn_key string
 --- @param path     string[]
 local function describe_symbol(conn_key, path)
@@ -663,11 +640,6 @@ local function describe_symbol(conn_key, path)
       end
       local details = result and result.details
       if not details or details == vim.NIL then
-        local schemas = path[1] and cached_schemas_containing(conn.conn_id, path[1]) or {}
-        if #schemas == 1 then
-          describe_symbol(conn_key, vim.list_extend({ schemas[1] }, path))
-          return
-        end
         vim.notify("grannos: nothing to describe here", vim.log.levels.WARN)
         return
       end
@@ -680,49 +652,61 @@ local function describe_symbol(conn_key, path)
   end)
 end
 
---- Attempt to resolve an ambiguous bare column (ts_queries.symbol_at_cursor's
---- second return value) using cached column lists for each candidate table —
---- again only ever consulting what's already cached in the explorer sidebar.
---- Describes the column and returns true when exactly one candidate's cached
---- columns contain it; otherwise does nothing and returns false, leaving the
---- caller to fall back to its own default behavior.
---- @param conn_key  string
---- @param ambiguous BareColumnAmbiguity
---- @return boolean
-local function resolve_ambiguous_column(conn_key, ambiguous)
+--- Resolve the symbol described by `query` to a node path via `explore.find`,
+--- then describe it. The backend owns the search: it knows where each kind of
+--- node lives in its own tree, and matches names case-insensitively against the
+--- catalog's own casing, which the query text rarely reproduces.
+--- Notifies instead of describing when the symbol names no node, or more than
+--- one — a bare column across joined tables is genuinely ambiguous, and picking
+--- one would be a guess.
+--- @param conn_key string
+--- @param query    SymbolQuery
+local function find_and_describe_symbol(conn_key, query)
   local conn = state.conns[conn_key]
-  if not conn then return false end
-  local matches = {}
-  for _, table_path in ipairs(ambiguous.candidates) do
-    local columns_path = vim.list_extend(vim.list_slice(table_path), { "columns" })
-    local columns = explorer.cached_child_names(conn.conn_id, columns_path)
-    if columns and vim.tbl_contains(columns, ambiguous.column) then
-      table.insert(matches, table_path)
-    end
-  end
-  if #matches ~= 1 then return false end
-  describe_symbol(conn_key, vim.list_extend(vim.list_slice(matches[1]), { "columns", ambiguous.column }))
-  return true
+  if not conn then return end
+  local params = {
+    connection_id = conn.conn_id,
+    type          = query.type,
+    name          = query.name,
+    scope         = query.scope,
+  }
+  client.request("explore.find", params, function(err, result)
+    vim.schedule(function()
+      if err then
+        vim.notify("grannos: " .. err, vim.log.levels.ERROR)
+        return
+      end
+      local paths = result and result.paths or {}
+      if #paths == 0 then
+        vim.notify(
+          ('grannos: no information found for "%s"'):format(query.name),
+          vim.log.levels.INFO)
+      elseif #paths > 1 then
+        vim.notify(
+          ('grannos: "%s" is ambiguous — %d matches'):format(query.name, #paths),
+          vim.log.levels.WARN)
+      else
+        describe_symbol(conn_key, paths[1])
+      end
+    end)
+  end)
 end
 
 --- Open a hover float showing execution info for the query at the cursor.
 --- If the hover float is already open, close it and open the results pane instead.
---- When the cursor sits on a table or column reference that resolves
---- unambiguously (see ts_queries.symbol_at_cursor), describes that symbol
---- instead of showing query-execution info. A bare column across multiple
---- candidate tables still gets a shot via resolve_ambiguous_column before
---- falling through to query-execution info.
+--- When the cursor sits on a table or column reference (see
+--- grannos.symbols.at_cursor), describes that symbol instead — including when
+--- the symbol turns out to name nothing, which is reported rather than falling
+--- back to query-execution info: the cursor is on an identifier, so execution
+--- info is not what was being asked for.
 function M.show_query_info()
   local bufnr    = vim.api.nvim_get_current_buf()
   local conn_key = state.buf_conns[bufnr]
   if not conn_key then return end
 
-  local symbol_path, ambiguous = ts_queries.symbol_at_cursor(bufnr)
-  if symbol_path then
-    describe_symbol(conn_key, symbol_path)
-    return
-  end
-  if ambiguous and resolve_ambiguous_column(conn_key, ambiguous) then
+  local symbol = symbols.at_cursor(bufnr)
+  if symbol then
+    find_and_describe_symbol(conn_key, symbol)
     return
   end
 

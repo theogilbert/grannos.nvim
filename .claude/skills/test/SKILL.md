@@ -5,31 +5,34 @@ description: Run grannos.nvim's plenary.nvim spec files headlessly from the CLI,
 
 Run the plenary specs in `spec/` headlessly.
 
-1. Find plenary.nvim's install directory. Try, in order, until one exists:
-   - `$HOME/.local/share/nvim/lazy/plenary.nvim`
-   - `$HOME/.local/share/knvim/lazy/plenary.nvim`
-   - `find $HOME/.local/share -maxdepth 6 -type d -iname plenary.nvim`
+1. The whole suite is just:
 
-2. Run the suite, substituting the discovered path for `<plenary_path>`:
+   ```
+   make ci
+   ```
 
-   All specs:
+2. A single file (when an argument names a spec, e.g. `$ARGUMENTS` = `spec/connections_spec.lua`):
+
    ```
    nvim --headless -u NONE \
-     -c "set rtp+=. rtp+=<plenary_path>" \
+     -c "set rtp^=." \
      -c "runtime! plugin/plenary.vim" \
-     -c "PlenaryBustedDirectory spec/" \
+     -c "lua require('plenary.test_harness').test_directory('$ARGUMENTS', { minimal_init = 'spec/minimal_init.lua' })" \
      -c "qa!"
    ```
 
-   A single file (when an argument names a spec, e.g. `$ARGUMENTS` = `spec/connections_spec.lua`):
-   ```
-   nvim --headless -u NONE \
-     -c "set rtp+=. rtp+=<plenary_path>" \
-     -c "runtime! plugin/plenary.vim" \
-     -c "PlenaryBustedFile $ARGUMENTS" \
-     -c "qa!"
-   ```
+3. Always pass `minimal_init = 'spec/minimal_init.lua'`, and never fall back to
+   plain `PlenaryBustedDirectory`/`PlenaryBustedFile`. Plenary spawns a child
+   process per spec file that appends `rtp+=.`, so an installed copy of
+   grannos.nvim under `site/pack` — a plugin-manager checkout of the same
+   plugin — sits *ahead* of the working tree. Module resolution then splits:
+   newly added files load from the working tree while edited ones load from the
+   installed copy, so a spec run can report passes against code that isn't the
+   code being edited. `spec/minimal_init.lua` prepends the working tree in the
+   child, which is what makes the run trustworthy.
 
-3. `-u NONE` skips the user's vimrc and plugin manager entirely, so `runtime! plugin/plenary.vim` must be sourced explicitly to register the `Plenary*` commands.
+4. `-u NONE` skips the user's vimrc and plugin manager entirely, so
+   `runtime! plugin/plenary.vim` must be sourced explicitly to register the
+   `Plenary*` commands in the outer process.
 
-4. Report results from plenary's own output: list failing test names with their `file:line`, and quote the "Passed in / Expected" diff plenary prints — don't just say "tests failed." Exit code is 1 if any test failed.
+5. Report results from plenary's own output: list failing test names with their `file:line`, and quote the "Passed in / Expected" diff plenary prints — don't just say "tests failed." Exit code is 1 if any test failed.
