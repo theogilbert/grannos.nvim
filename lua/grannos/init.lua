@@ -726,9 +726,9 @@ function M.show_query_info()
     if entry.status == "success" then
       results_ui.show_results(
         entry.columns or {}, log.load_rows(entry),
-        entry.rows_returned, entry.rows_total, entry.duration_ms)
+        entry.rows_returned, entry.rows_total, entry.duration_ms, entry.messages)
     elseif entry.status == "rows_affected" then
-      results_ui.show_rows_affected(entry.rows_affected, entry.verb or "affected", entry.duration_ms)
+      results_ui.show_rows_affected(entry.rows_affected, entry.verb or "affected", entry.duration_ms, entry.messages)
     elseif entry.status == "error" then
       results_ui.show_error(entry.error_msg or "unknown error")
     end

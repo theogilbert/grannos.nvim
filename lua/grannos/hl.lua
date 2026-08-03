@@ -13,6 +13,8 @@ local LOB_FG       = "#6B7280"
 local SPECIAL_FLOAT_FG = "#D19A66"
 local HELP_FG      = "#4B9CD3"
 local THOUSANDS_FG = "#767676"
+local MSG_INFO_FG  = "#7DA9C4"  -- muted blue: statement output, secondary to the data
+local MSG_WARN_FG  = "#E5C07B"  -- amber, same as the gutter's running mark
 local SCROLLBAR_FG = "#888888"
 local BOOL_TRUE_FG  = "#98C379"  -- same green as GrannosQuerySuccess
 local BOOL_FALSE_FG = ERROR_FG
@@ -71,6 +73,8 @@ local function build_highlights()
     GrannosSpecialFloat = { fg = SPECIAL_FLOAT_FG, italic = true },
     GrannosHelp      = { fg = HELP_FG, italic = true },
     GrannosThousandsSeparator = { fg = THOUSANDS_FG },
+    GrannosMessageInfo        = { fg = MSG_INFO_FG },
+    GrannosMessageWarning     = { fg = MSG_WARN_FG },
     GrannosScrollbarThumb     = { fg = SCROLLBAR_FG },
     GrannosBoolTrue           = { fg = BOOL_TRUE_FG,  bold = true },
     GrannosBoolFalse          = { fg = BOOL_FALSE_FG, bold = true },

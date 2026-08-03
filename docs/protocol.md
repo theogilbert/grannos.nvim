@@ -188,6 +188,7 @@ The query language and bind parameter syntax depend on the driver — see [Drive
 | `rows`        | array of arrays   | Each row is an array of values                     |
 | `rows_total`  | integer           | Total number of rows matching the query            |
 | `duration_ms` | number            | Wall-clock execution time in milliseconds          |
+| `messages`    | array             | [ExecuteMessage](#executemessage) objects; `[]` when there are none |
 
 **result — INSERT / UPDATE / DELETE / write statements**
 
@@ -195,17 +196,55 @@ The query language and bind parameter syntax depend on the driver — see [Drive
 |-----------------|---------|---------------------------------------------|
 | `rows_affected` | integer | Number of rows/nodes/relationships affected |
 | `duration_ms`   | number  | Wall-clock execution time in milliseconds   |
+| `messages`      | array   | [ExecuteMessage](#executemessage) objects; `[]` when there are none |
 
 **examples**
 
 ```json
 {"id":2,"method":"execute","params":{"connection_id":"0","query":"SELECT id, name FROM users WHERE active = ?","params":[1]}}
-{"id":2,"result":{"columns":["id","name"],"rows":[[1,"Alice"],[2,"Bob"]],"rows_total":2,"duration_ms":3.142},"error":null}
+{"id":2,"result":{"columns":["id","name"],"rows":[[1,"Alice"],[2,"Bob"]],"rows_total":2,"duration_ms":3.142,"messages":[]},"error":null}
 ```
 
 ```json
 {"id":3,"method":"execute","params":{"connection_id":"0","query":"DELETE FROM users WHERE active = 0"}}
-{"id":3,"result":{"rows_affected":4,"duration_ms":1.05},"error":null}
+{"id":3,"result":{"rows_affected":4,"duration_ms":1.05,"messages":[]},"error":null}
+```
+
+#### ExecuteMessage
+
+Out-of-band text a statement produced alongside (or instead of) its result — Oracle
+`DBMS_OUTPUT` lines, PL/SQL compilation errors, and equivalents in other drivers. A message
+is **not** an error: the statement succeeded, and a failed request is still reported through
+the response's `error` field. Messages are listed in emission order and are expected to be
+rendered near the result, highlighted according to `level`.
+
+| Field   | Type             | Description                                                        |
+|---------|------------------|--------------------------------------------------------------------|
+| `level` | string           | `"info"` or `"warning"` — see below                                |
+| `text`  | string           | The message, with no position prefix to parse                      |
+| `line`  | integer or null  | 1-indexed line in the submitted `query`, or `null` if unpositioned |
+| `col`   | integer or null  | 1-indexed column within `line`; `null` when the position is unknown or `line` is `null` |
+
+`level` values:
+
+| Level     | Meaning                                                                       |
+|-----------|-------------------------------------------------------------------------------|
+| `info`    | Output the statement chose to emit (`DBMS_OUTPUT.PUT_LINE`, `RAISE NOTICE`, `PRINT`) |
+| `warning` | The statement succeeded, but the server flagged a problem with it              |
+
+`line`/`col` index into the exact `query` string the client submitted, so a client can jump
+to or highlight the offending position without adjusting for anything the server did to the
+text. Both are `null` for messages that refer to no particular position, which is the normal
+case for `info`. When `line` is `null`, `col` is always `null` too.
+
+```json
+{"id":4,"method":"execute","params":{"connection_id":"0","query":"CREATE OR REPLACE PROCEDURE p AS\nBEGIN\n    no_such_thing();\nEND;"}}
+{"id":4,"result":{"rows_affected":0,"duration_ms":12.4,"messages":[{"level":"warning","text":"PLS-00201: identifier 'NO_SUCH_THING' must be declared","line":3,"col":5}]},"error":null}
+```
+
+```json
+{"id":5,"method":"execute","params":{"connection_id":"0","query":"BEGIN DBMS_OUTPUT.PUT_LINE('done'); END;"}}
+{"id":5,"result":{"rows_affected":0,"duration_ms":2.1,"messages":[{"level":"info","text":"done","line":null,"col":null}]},"error":null}
 ```
 
 #### Cell values

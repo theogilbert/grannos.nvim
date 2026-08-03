@@ -355,6 +355,35 @@ Query results are shown in a dedicated buffer named `grannos://results`.
 The buffer is read-only and reused across queries. Its direction and size
 are controlled by |grannos-results-split| and |grannos-results-height|.
 
+STATEMENT MESSAGES ~
+                                                    *grannos-messages*
+
+Some statements produce text alongside their result — Oracle
+`DBMS_OUTPUT.PUT_LINE` output, or the compilation errors of a PL/SQL object
+that Oracle "created" successfully but which does not compile. These are
+shown just above the result table, one line each:
+
+    2 rows  ·  0.003s
+                                                                        ~
+    › starting
+    ⚠ 3:5  PLS-00201: identifier 'NO_SUCH_THING' must be declared
+                                                                        ~
+    │ ID │ NAME  │
+    ├────┼───────┤
+
+A message is not an error — the statement succeeded. Failures still replace
+the whole result with an `Error:` message as before.
+
+Two levels, each with its own highlight group:
+
+  `›` info      Output the statement chose to emit.  `GrannosMessageInfo`
+  `⚠` warning   The statement worked, but the server `GrannosMessageWarning`
+              flagged a problem with it.
+
+A warning that refers to a position in the query is prefixed with it as
+`line:col` (or just `line` when the column is unknown), counted against the
+query text exactly as you submitted it.
+
 KEYMAPS ~
 
   H       Scroll left one column.

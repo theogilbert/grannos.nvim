@@ -181,6 +181,7 @@ end
 --- @field rows_returned integer|nil
 --- @field rows_total    integer|nil
 --- @field duration_ms   number|nil
+--- @field messages      table[]|nil  ExecuteMessage objects from the response
 
 --- Record a new query as "running" and persist it to disk.
 --- `source_line` is 0-indexed.

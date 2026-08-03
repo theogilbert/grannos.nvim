@@ -36,10 +36,10 @@ end
 --- @param sql    string  the original query text
 local function dispatch_result(result, sql)
   if result.rows_affected ~= nil then
-    results.show_rows_affected(result.rows_affected, detect_operation(sql), result.duration_ms)
+    results.show_rows_affected(result.rows_affected, detect_operation(sql), result.duration_ms, result.messages)
   else
     local rows = result.rows or {}
-    results.show_results(result.columns or {}, rows, #rows, result.rows_total, result.duration_ms)
+    results.show_results(result.columns or {}, rows, #rows, result.rows_total, result.duration_ms, result.messages)
   end
 end
 
@@ -50,10 +50,10 @@ end
 --- @param sql    string   the statement text
 local function dispatch_batch_result(idx, total, result, sql)
   if result.rows_affected ~= nil then
-    results.append_batch_rows_affected(idx, total, result.rows_affected, detect_operation(sql), result.duration_ms, sql)
+    results.append_batch_rows_affected(idx, total, result.rows_affected, detect_operation(sql), result.duration_ms, sql, result.messages)
   else
     local rows = result.rows or {}
-    results.append_batch_result(idx, total, result.columns or {}, rows, #rows, result.rows_total, result.duration_ms, sql)
+    results.append_batch_result(idx, total, result.columns or {}, rows, #rows, result.rows_total, result.duration_ms, sql, result.messages)
   end
 end
 
@@ -121,6 +121,7 @@ update_log_from_result = function(conn_key, log_id, result, sql)
       rows_affected = result.rows_affected,
       verb          = detect_operation(sql),
       duration_ms   = result.duration_ms,
+      messages      = result.messages,
     })
   else
     local rows = result.rows or {}
@@ -130,6 +131,7 @@ update_log_from_result = function(conn_key, log_id, result, sql)
       rows_returned = #rows,
       rows_total    = result.rows_total,
       duration_ms   = result.duration_ms,
+      messages      = result.messages,
     })
   end
 end

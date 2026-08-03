@@ -19,6 +19,7 @@ local client         = require("grannos.client")
 local content_buffer = require("grannos.ui.content_buffer")
 local hover          = require("grannos.ui.hover")
 local column_ui      = require("grannos.ui.column")
+local messages       = require("grannos.messages")
 
 local M = {}
 
@@ -32,6 +33,22 @@ local render_table              -- forward declaration; defined after apply_high
 local export_results            -- forward declaration; defined after open_export_buffer
 local toggle_thousands_separator -- forward declaration; defined after rebuild_segments
 local segment_at_line           -- forward declaration; defined after render_segments
+
+--- Return a copy of `rules` with every row shifted down by `offset` lines.
+--- @param rules  table[]  highlight rules with 0-indexed relative rows
+--- @param offset integer
+--- @return table[]
+local function shift_rules(rules, offset)
+  local out = {}
+  for _, r in ipairs(rules) do
+    table.insert(out, {
+      higroup = r.higroup,
+      start   = { r.start[1]  + offset, r.start[2] },
+      finish  = { r.finish[1] + offset, r.finish[2] },
+    })
+  end
+  return out
+end
 
 --- Return true when column arrays `a` and `b` are identical.
 --- @param a string[]
@@ -449,15 +466,16 @@ end
 --- currently-rendered page and visible-column order) at the same 0-indexed
 --- buffer-line numbering `table.lua`'s *_hl_rules functions use internally —
 --- see their "data row i maps to 0-indexed buffer line i" comment. The table
---- always starts at absolute buffer line 2 (row-count label, blank line, then
---- the table itself — see render_table's `content = { label, "" }`).
+--- starts at `buf_state.table_start`, which is 2 (row-count label, blank line)
+--- plus however many lines any statement messages took above it — see
+--- render_table.
 --- @param buf_state table
 --- @return table|nil
 local function lob_cell_at_cursor(buf_state)
   local tbl = buf_state.table_data
   if not tbl then return nil end
   local buf_line  = vim.api.nvim_win_get_cursor(0)[1] - 1  -- 0-indexed
-  local data_line = buf_line - 2
+  local data_line = buf_line - (buf_state.table_start or 2)
   local row       = tbl.lines[data_line]
   if not row then return nil end
   local col_idx = table_fmt.get_column_at_cursor(tbl.columns_width, vim.fn.virtcol("."))
@@ -648,7 +666,8 @@ end
 --- @param tbl        table   FormattedTable from table_fmt.from_structured_data
 --- @param label_line integer  0-indexed row for GrannosRowCount
 --- @param tbl_offset integer  0-indexed row where the table starts
-local function apply_highlights(buf_state, tbl, label_line, tbl_offset)
+--- @param extra      table[]|nil  already-absolute rules to apply alongside
+local function apply_highlights(buf_state, tbl, label_line, tbl_offset, extra)
   local rules = table_fmt.col_hl_rules("GrannosHeaderRow", tbl_offset, 1, tbl)
   table.insert(rules, {
     higroup = "GrannosRowCount",
@@ -679,6 +698,7 @@ local function apply_highlights(buf_state, tbl, label_line, tbl_offset)
     r.finish[1] = r.finish[1] + tbl_offset
   end
   vim.list_extend(rules, sep_rules)
+  if extra then vim.list_extend(rules, extra) end
   buf_state.buffer:apply_highlight(rules)
 end
 
@@ -713,9 +733,15 @@ render_table = function(buf_state)
     label = label .. "  ·  " .. format_duration(buf_state.duration_ms)
   end
   local content = { label, "" }
+  -- Statement output sits between the row-count label and the table, so it reads
+  -- immediately above the data it accompanied.
+  local msg_lines, msg_rules = messages.render_block(buf_state.messages)
+  vim.list_extend(content, msg_lines)
+  local tbl_offset = #content
   vim.list_extend(content, tbl.text)
+  buf_state.table_start = tbl_offset
   buf_state.buffer:set_content(content)
-  apply_highlights(buf_state, tbl, 0, 2)
+  apply_highlights(buf_state, tbl, 0, tbl_offset, shift_rules(msg_rules, 2))
   update_truncation_indicators()
 end
 
@@ -869,8 +895,9 @@ end
 --- @param duration_ms   number|nil
 --- @param sep_columns   table  set of column names with the separator toggled on
 --- @param sql           string  the statement text, for the batch header preview
+--- @param msgs          table[]|nil  ExecuteMessage objects from the response
 --- @return table  segment
-local function build_segment(idx, total, columns, rows, rows_returned, rows_total, duration_ms, sep_columns, sql)
+local function build_segment(idx, total, columns, rows, rows_returned, rows_total, duration_ms, sep_columns, sql, msgs)
   local page_size = config.options.results.page_size
   local display   = { columns }
   for i = 1, math.min(rows_returned, page_size) do table.insert(display, rows[i]) end
@@ -879,21 +906,26 @@ local function build_segment(idx, total, columns, rows, rows_returned, rows_tota
   local label = rows_label(rows_returned, rows_total, 1, page_size)
   if duration_ms then label = label .. "  ·  " .. format_duration(duration_ms) end
   local content = { label, "" }
+  local msg_lines, msg_rules = messages.render_block(msgs)
+  vim.list_extend(content, msg_lines)
+  local tbl_offset = #content
   vim.list_extend(content, tbl.text)
-  local rules = table_fmt.col_hl_rules("GrannosHeaderRow", 2, 1, tbl)
+  local rules = table_fmt.col_hl_rules("GrannosHeaderRow", tbl_offset, 1, tbl)
   table.insert(rules, { higroup = "GrannosRowCount",
     start = { 0, 0 }, finish = { 0, -1 } })
+  vim.list_extend(rules, shift_rules(msg_rules, 2))
   for _, r in ipairs(table_fmt.thousands_hl_rules(tbl)) do
     table.insert(rules, {
       higroup = r.higroup,
-      start   = { r.start[1]  + 2, r.start[2] },
-      finish  = { r.finish[1] + 2, r.finish[2] },
+      start   = { r.start[1]  + tbl_offset, r.start[2] },
+      finish  = { r.finish[1] + tbl_offset, r.finish[2] },
     })
   end
   return {
     header = make_header(idx, total, sql), lines = content, hl_rules = rules, tbl = tbl,
     idx = idx, total = total, columns = columns, rows = rows,
     rows_returned = rows_returned, rows_total = rows_total, duration_ms = duration_ms, sql = sql,
+    messages = msgs,
   }
 end
 
@@ -905,7 +937,7 @@ local function rebuild_segments(buf_state)
   for i, seg in ipairs(buf_state.segments) do
     if seg.tbl then
       buf_state.segments[i] = build_segment(seg.idx, seg.total, seg.columns, seg.rows,
-        seg.rows_returned, seg.rows_total, seg.duration_ms, buf_state.sep_columns, seg.sql)
+        seg.rows_returned, seg.rows_total, seg.duration_ms, buf_state.sep_columns, seg.sql, seg.messages)
     end
   end
 end
@@ -961,11 +993,12 @@ end
 --- @param rows_total    integer|nil
 --- @param duration_ms   number|nil
 --- @param sql           string  the statement text, for the batch header preview
-function M.append_batch_result(idx, total, columns, rows, rows_returned, rows_total, duration_ms, sql)
+--- @param msgs          table[]|nil  ExecuteMessage objects from the response
+function M.append_batch_result(idx, total, columns, rows, rows_returned, rows_total, duration_ms, sql, msgs)
   local buf_state = active_buf_state()
   rows_returned = rows_returned or #rows
   rows_total    = rows_total    or rows_returned
-  table.insert(buf_state.segments, build_segment(idx, total, columns, rows, rows_returned, rows_total, duration_ms, buf_state.sep_columns, sql))
+  table.insert(buf_state.segments, build_segment(idx, total, columns, rows, rows_returned, rows_total, duration_ms, buf_state.sep_columns, sql, msgs))
   render_segments(buf_state)
 end
 
@@ -993,7 +1026,8 @@ end
 --- @param rows_returned integer
 --- @param rows_total    integer|nil
 --- @param duration_ms   number|nil
-function M.show_results(columns, rows, rows_returned, rows_total, duration_ms)
+--- @param msgs          table[]|nil  ExecuteMessage objects from the response
+function M.show_results(columns, rows, rows_returned, rows_total, duration_ms, msgs)
   local buf_state = active_buf_state()
   stop_loading(buf_state)
   if not buf_state.raw_columns or not same_columns(buf_state.raw_columns, columns) then
@@ -1004,6 +1038,7 @@ function M.show_results(columns, rows, rows_returned, rows_total, duration_ms)
   buf_state.rows_returned  = rows_returned or #rows
   buf_state.rows_total     = rows_total    or buf_state.rows_returned
   buf_state.duration_ms    = duration_ms
+  buf_state.messages       = msgs
   buf_state.page           = 1
   ensure_win(buf_state.buffer.buf_id)
   render_table(buf_state)
@@ -1014,17 +1049,25 @@ end
 --- @param n           integer
 --- @param verb        string
 --- @param duration_ms number|nil
-function M.show_rows_affected(n, verb, duration_ms)
+--- @param msgs        table[]|nil  ExecuteMessage objects from the response
+function M.show_rows_affected(n, verb, duration_ms, msgs)
   local buf_state = active_buf_state()
   stop_loading(buf_state)
   buf_state.table_data = nil
   ensure_win(buf_state.buffer.buf_id)
   local msg = rows_affected_msg(n, verb)
   if duration_ms then msg = msg .. "  ·  " .. format_duration(duration_ms) end
-  buf_state.buffer:set_content({ msg })
-  buf_state.buffer:apply_highlight({
-    { higroup = "GrannosRowCount", start = { 0, 0 }, finish = { 0, -1 } },
-  })
+  local content = { msg }
+  -- No table here, so the messages are the substance of the result: the count
+  -- line stays on top as the status line and the output follows it.
+  local msg_lines, msg_rules = messages.render(msgs)
+  if #msg_lines > 0 then table.insert(content, "") end
+  local offset = #content
+  vim.list_extend(content, msg_lines)
+  buf_state.buffer:set_content(content)
+  local rules = { { higroup = "GrannosRowCount", start = { 0, 0 }, finish = { 0, -1 } } }
+  vim.list_extend(rules, shift_rules(msg_rules, offset))
+  buf_state.buffer:apply_highlight(rules)
   reset_cursor()
 end
 
@@ -1035,14 +1078,22 @@ end
 --- @param verb        string
 --- @param duration_ms number|nil
 --- @param sql         string  the statement text, for the batch header preview
-function M.append_batch_rows_affected(idx, total, n, verb, duration_ms, sql)
+--- @param msgs        table[]|nil  ExecuteMessage objects from the response
+function M.append_batch_rows_affected(idx, total, n, verb, duration_ms, sql, msgs)
   local buf_state = active_buf_state()
   local msg = rows_affected_msg(n, verb)
   if duration_ms then msg = msg .. "  ·  " .. format_duration(duration_ms) end
+  local lines = { msg }
+  local msg_lines, msg_rules = messages.render(msgs)
+  if #msg_lines > 0 then table.insert(lines, "") end
+  local offset = #lines
+  vim.list_extend(lines, msg_lines)
+  local rules = { { higroup = "GrannosRowCount", start = { 0, 0 }, finish = { 0, -1 } } }
+  vim.list_extend(rules, shift_rules(msg_rules, offset))
   table.insert(buf_state.segments, {
     header   = make_header(idx, total, sql),
-    lines    = { msg },
-    hl_rules = { { higroup = "GrannosRowCount", start = { 0, 0 }, finish = { 0, -1 } } },
+    lines    = lines,
+    hl_rules = rules,
     sql      = sql,
   })
   render_segments(buf_state)
