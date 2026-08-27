@@ -718,7 +718,8 @@ end
 --- Open a hover float showing execution info for the query at the cursor.
 --- Statement-scoped: it works from any column of an executed statement,
 --- identifiers included, so it never competes with the symbol hover.
---- If the hover float is already open, close it and open the results pane instead.
+--- The float footer names the key to press again — this one — to close it and
+--- reopen that run's results in the results pane.
 function M.show_query_info()
   local bufnr    = vim.api.nvim_get_current_buf()
   local conn_key = state.buf_conns[bufnr]
@@ -749,14 +750,24 @@ function M.show_query_info()
     return
   end
 
-  hover.open(render_query_info(entry), bufnr)
+  local lines, hls = render_query_info(entry, config.options.keymaps.query_info_key)
+  hover.open(lines, bufnr, { hls = hls })
 end
 
 --- Return display lines for a query log entry (pure, no nvim API calls).
---- @param entry LogEntry
---- @return string[]
-render_query_info = function(entry)
+--- A finished entry gets a footer hinting at the key that reopens its results:
+--- the log holds every entry's rows (spilling large sets to disk), so a run
+--- stays reopenable for the whole session. Entries merged back from disk carry
+--- no bufnr and so are never found here, which costs nothing: their gutter
+--- marks are gone too, leaving no line to press the key on.
+--- @param entry      LogEntry
+--- @param reopen_key string|nil  key that reopens the entry's results in the
+---                   results pane; omitted, no footer hint is rendered
+--- @return string[]        display lines
+--- @return DetailHlRule[]  positional highlights for those lines
+render_query_info = function(entry, reopen_key)
   local lines = {}
+  local hls   = {}
   table.insert(lines, "Executed: " .. os.date("%Y-%m-%d %H:%M:%S", entry.timestamp))
   if entry.status == "running" then
     table.insert(lines, "Status:   running…")
@@ -777,7 +788,12 @@ render_query_info = function(entry)
       table.insert(lines, s)
     end
   end
-  return lines
+  if reopen_key and entry.status ~= "running" then
+    table.insert(lines, "")
+    table.insert(lines, ("%s  reopen results"):format(reopen_key))
+    table.insert(hls, { "GrannosExplorerDim", #lines - 1, 0, -1 })
+  end
+  return lines, hls
 end
 
 --- Cancel the running query that covers the cursor line.
