@@ -27,7 +27,11 @@ M.defaults = {
   queries_dir = nil,
 
   keymaps = {
+    -- Describe the symbol (or panel item) under the cursor.
     hover_key = "K",
+
+    -- Show execution info for the query under the cursor, in query buffers.
+    query_info_key = "gK",
   },
 
   -- When a driver has at most this many connections total, skip the group step

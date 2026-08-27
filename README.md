@@ -65,8 +65,12 @@ require("grannos").setup({
   -- queries_dir = vim.fn.expand("~/.local/share/grannos/queries"),
 
   keymaps = {
-    -- Key in the connections panel to show the error details float.
+    -- Describe the symbol (or panel item) under the cursor. In the connections
+    -- panel this shows the connection details / error float.
     hover_key = "K",
+
+    -- Show execution info for the query under the cursor, in query buffers.
+    query_info_key = "gK",
   },
 
   -- Results window appearance.

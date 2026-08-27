@@ -79,7 +79,7 @@ end
 --- @param name  string|nil
 --- @param opts  { silent: boolean|nil }|nil  silent = true records the association (so
 ---              current-buffer APIs like `open_explorer()` resolve it) without showing
----              the floating "Connected to …" label or installing the query-info "K" keymap
+---              the floating "Connected to …" label or installing the symbol/query-info keymaps
 local function set_buf_conn(bufnr, name, opts)
   state.buf_conns[bufnr]   = name
   state.silent_bufs[bufnr] = (opts and opts.silent) or nil
@@ -87,10 +87,15 @@ local function set_buf_conn(bufnr, name, opts)
   for _, winid in ipairs(vim.fn.win_findbuf(bufnr)) do
     if name then conn_label.show(winid, conn_display_label(name)) else conn_label.hide(winid) end
   end
+  local keys = config.options.keymaps
   if name then
-    vim.keymap.set("n", "K", function() M.show_query_info() end, { buffer = bufnr, desc = "Show query info" })
+    vim.keymap.set("n", keys.hover_key, function() M.describe_symbol_at_cursor() end,
+      { buffer = bufnr, desc = "Describe symbol under cursor" })
+    vim.keymap.set("n", keys.query_info_key, function() M.show_query_info() end,
+      { buffer = bufnr, desc = "Show query info" })
   else
-    pcall(vim.keymap.del, "n", "K", { buffer = bufnr })
+    pcall(vim.keymap.del, "n", keys.hover_key, { buffer = bufnr })
+    pcall(vim.keymap.del, "n", keys.query_info_key, { buffer = bufnr })
   end
 end
 
@@ -692,23 +697,32 @@ local function find_and_describe_symbol(conn_key, query)
   end)
 end
 
---- Open a hover float showing execution info for the query at the cursor.
---- If the hover float is already open, close it and open the results pane instead.
---- When the cursor sits on a table or column reference (see
---- grannos.symbols.at_cursor), describes that symbol instead — including when
---- the symbol turns out to name nothing, which is reported rather than falling
---- back to query-execution info: the cursor is on an identifier, so execution
---- info is not what was being asked for.
-function M.show_query_info()
+--- Describe the symbol under the cursor (see grannos.symbols.at_cursor) in a
+--- detail float. Token-scoped, and deliberately without a fallback: when the
+--- cursor is not on a symbol this reports that and stops, because execution
+--- info for the surrounding statement has its own key (M.show_query_info),
+--- reachable from every column of the statement including this one.
+function M.describe_symbol_at_cursor()
   local bufnr    = vim.api.nvim_get_current_buf()
   local conn_key = state.buf_conns[bufnr]
   if not conn_key then return end
 
   local symbol = symbols.at_cursor(bufnr)
-  if symbol then
-    find_and_describe_symbol(conn_key, symbol)
+  if not symbol then
+    vim.notify("grannos: no symbol under the cursor", vim.log.levels.INFO)
     return
   end
+  find_and_describe_symbol(conn_key, symbol)
+end
+
+--- Open a hover float showing execution info for the query at the cursor.
+--- Statement-scoped: it works from any column of an executed statement,
+--- identifiers included, so it never competes with the symbol hover.
+--- If the hover float is already open, close it and open the results pane instead.
+function M.show_query_info()
+  local bufnr    = vim.api.nvim_get_current_buf()
+  local conn_key = state.buf_conns[bufnr]
+  if not conn_key then return end
 
   local stmt  = ts_queries.statement_at_cursor(bufnr)
   local line  = stmt and stmt.start_row or (vim.api.nvim_win_get_cursor(0)[1] - 1)
