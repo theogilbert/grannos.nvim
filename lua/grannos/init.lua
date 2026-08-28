@@ -93,9 +93,12 @@ local function set_buf_conn(bufnr, name, opts)
       { buffer = bufnr, desc = "Describe symbol under cursor" })
     vim.keymap.set("n", keys.query_info_key, function() M.show_query_info() end,
       { buffer = bufnr, desc = "Show query info" })
+    vim.keymap.set("n", keys.goto_symbol_key, function() M.goto_symbol_at_cursor() end,
+      { buffer = bufnr, desc = "Reveal symbol under cursor in the explorer" })
   else
     pcall(vim.keymap.del, "n", keys.hover_key, { buffer = bufnr })
     pcall(vim.keymap.del, "n", keys.query_info_key, { buffer = bufnr })
+    pcall(vim.keymap.del, "n", keys.goto_symbol_key, { buffer = bufnr })
   end
 end
 
@@ -657,16 +660,47 @@ local function describe_symbol(conn_key, path)
   end)
 end
 
---- Resolve the symbol described by `query` to a node path via `explore.find`,
---- then describe it. The backend owns the search: it knows where each kind of
---- node lives in its own tree, and matches names case-insensitively against the
---- catalog's own casing, which the query text rarely reproduces.
---- Notifies instead of describing when the symbol names no node, or more than
+--- Disambiguate candidates in the two-pane picker, which previews each one's
+--- describe result — worth the screen for the describe key, whose whole purpose
+--- is that content.
+--- @param conn_key  string
+--- @param paths     string[][]
+--- @param name      string  the symbol as written in the query
+--- @param on_choice fun(path: string[])
+local function pick_candidate_preview(conn_key, paths, name, on_choice)
+  local conn = state.conns[conn_key]
+  if not conn then return end
+  require("grannos.ui.symbol_picker").open(conn.conn_id, paths, name, on_choice)
+end
+
+--- Disambiguate candidates in a plain vim.ui.select — enough for a jump, where
+--- the explorer itself is about to show what the chosen node is.
+--- @param _         string  conn_key, unused
+--- @param paths     string[][]
+--- @param name      string  the symbol as written in the query
+--- @param on_choice fun(path: string[])
+local function pick_candidate_select(_, paths, name, on_choice)
+  vim.ui.select(paths, {
+    prompt      = ('Reveal "%s":'):format(name),
+    format_item = function(path) return table.concat(path, ".") end,
+  }, function(path)
+    if path then on_choice(path) end
+  end)
+end
+
+--- Resolve the symbol described by `query` to a node path via `explore.find`
+--- and hand that path to `on_path`. The backend owns the search: it knows where
+--- each kind of node lives in its own tree, and matches names case-insensitively
+--- against the catalog's own casing, which the query text rarely reproduces.
+--- Notifies and stops when the symbol names no node; when it names more than
 --- one — a bare column across joined tables is genuinely ambiguous, and picking
---- one would be a guess.
+--- one would be a guess — `pick` asks, and `on_path` runs on what comes back.
 --- @param conn_key string
 --- @param query    SymbolQuery
-local function find_and_describe_symbol(conn_key, query)
+--- @param on_path  fun(path: string[])
+--- @param pick     fun(conn_key: string, paths: string[][], name: string, on_choice: fun(path: string[]))|nil
+---                 how to disambiguate; defaults to the previewing two-pane picker
+local function resolve_symbol(conn_key, query, on_path, pick)
   local conn = state.conns[conn_key]
   if not conn then return end
   local params = {
@@ -687,11 +721,9 @@ local function find_and_describe_symbol(conn_key, query)
           ('grannos: no information found for "%s"'):format(query.name),
           vim.log.levels.INFO)
       elseif #paths > 1 then
-        vim.notify(
-          ('grannos: "%s" is ambiguous — %d matches'):format(query.name, #paths),
-          vim.log.levels.WARN)
+        (pick or pick_candidate_preview)(conn_key, paths, query.name, on_path)
       else
-        describe_symbol(conn_key, paths[1])
+        on_path(paths[1])
       end
     end)
   end)
@@ -712,7 +744,29 @@ function M.describe_symbol_at_cursor()
     vim.notify("grannos: no symbol under the cursor", vim.log.levels.INFO)
     return
   end
-  find_and_describe_symbol(conn_key, symbol)
+  resolve_symbol(conn_key, symbol, function(path)
+    describe_symbol(conn_key, path)
+  end)
+end
+
+--- Reveal the symbol under the cursor in the schema explorer: opens (or
+--- focuses) the sidebar for this buffer's connection, expands the tree down to
+--- the node the symbol names, and leaves the cursor on it. Resolution is the
+--- same as the describe key's, ambiguity picker included.
+function M.goto_symbol_at_cursor()
+  local bufnr    = vim.api.nvim_get_current_buf()
+  local conn_key = state.buf_conns[bufnr]
+  if not conn_key then return end
+
+  local symbol = symbols.at_cursor(bufnr)
+  if not symbol then
+    vim.notify("grannos: no symbol under the cursor", vim.log.levels.INFO)
+    return
+  end
+  resolve_symbol(conn_key, symbol, function(path)
+    M.open_explorer_for(conn_key)
+    explorer.reveal(path)
+  end, pick_candidate_select)
 end
 
 --- Open a hover float showing execution info for the query at the cursor.

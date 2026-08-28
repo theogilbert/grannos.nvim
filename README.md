@@ -71,6 +71,9 @@ require("grannos").setup({
 
     -- Show execution info for the query under the cursor, in query buffers.
     query_info_key = "gK",
+
+    -- Reveal the symbol under the cursor in the schema explorer, in query buffers.
+    goto_symbol_key = "<C-]>",
   },
 
   -- Results window appearance.

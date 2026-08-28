@@ -221,7 +221,9 @@ end
 --- `reset_cache` = true instructs the server to discard its cache.
 --- @param node        ExplorerNode
 --- @param reset_cache boolean|nil
-local function load_children(node, reset_cache)
+--- @param on_done     fun(err: string|nil)|nil  called after the re-render, so a caller
+---                    walking a path can descend into the children just loaded
+local function load_children(node, reset_cache, on_done)
   node.loading = true
   spinner:start()
   render()
@@ -234,6 +236,7 @@ local function load_children(node, reset_cache)
       vim.schedule(function()
         vim.notify("grannos explorer: " .. err, vim.log.levels.ERROR)
         render()
+        if on_done then on_done(err) end
       end)
       return
     end
@@ -243,7 +246,10 @@ local function load_children(node, reset_cache)
       node.children[#node.children + 1] = make_node(item, child_path)
     end
     node.expanded = true
-    vim.schedule(render)
+    vim.schedule(function()
+      render()
+      if on_done then on_done(nil) end
+    end)
   end)
 end
 
@@ -718,9 +724,21 @@ local function on_describe()
   end)
 end
 
+--- Callbacks waiting for the in-flight root load to finish; see with_root.
+--- @type fun(err: string|nil)[]
+local root_waiters = {}
+
 --- Fetch the root node list from the server and repopulate state.tree.
 --- @param reset_cache boolean|nil  pass true to discard the server-side cache
 local function load_root(reset_cache)
+  --- Hand `err` to everything waiting on this load and clear the queue.
+  --- @param err string|nil
+  local function settle(err)
+    local waiters = root_waiters
+    root_waiters  = {}
+    for _, cb in ipairs(waiters) do cb(err) end
+  end
+
   local params = { connection_id = state.conn_id, path = {} }
   if reset_cache then params.reset_cache = true end
   state.root_loading = true
@@ -733,6 +751,7 @@ local function load_root(reset_cache)
       vim.schedule(function()
         vim.notify("grannos explorer: " .. err, vim.log.levels.ERROR)
         render()
+        settle(err)
       end)
       return
     end
@@ -740,8 +759,43 @@ local function load_root(reset_cache)
     for _, item in ipairs(result.items or {}) do
       state.tree[#state.tree + 1] = make_node(item, { item.name })
     end
-    vim.schedule(render)
+    vim.schedule(function()
+      render()
+      settle(nil)
+    end)
   end)
+end
+
+--- Run `cb` once the root node list is populated: immediately when the tree is
+--- already there, otherwise after the load finishes — joining an in-flight one
+--- rather than starting a second.
+--- @param cb fun(err: string|nil)
+local function with_root(cb)
+  if #state.tree > 0 then
+    cb(nil)
+    return
+  end
+  root_waiters[#root_waiters + 1] = cb
+  if not state.root_loading then load_root() end
+end
+
+--- Return the 1-indexed line `node` occupies in the current rendering, or nil
+--- when an ancestor is collapsed and it isn't on screen.
+--- @param node ExplorerNode
+--- @return integer|nil
+local function line_of_node(node)
+  local idx = 0
+  local function walk(nodes)
+    for _, n in ipairs(nodes) do
+      idx = idx + 1
+      if n == node then return idx end
+      if n.expanded and n.children then
+        local found = walk(n.children)
+        if found then return found end
+      end
+    end
+  end
+  return walk(state.tree)
 end
 
 local PREVIEWABLE_TYPES  = { table = true, ["base table"] = true, view = true, collection = true, metric = true, gridfs_bucket = true }
@@ -915,6 +969,61 @@ function M.reset()
   state.root_loading = false
   spinner:reset()
 end
+
+--- Expand every ancestor of `path` and put the cursor on the node it names,
+--- focusing the explorer window. Children are loaded one level at a time, so a
+--- path resolves even when nothing along it has been expanded yet. Notifies
+--- when a segment names no node — the tree the backend resolved the path
+--- against and the one on screen can disagree after a schema change.
+--- @param path string[]  absolute path from the root, as returned by explore.find
+function M.reveal(path)
+  if #path == 0 or not (state.buffer and state.buffer:is_valid()) then return end
+
+  --- Focus the explorer window with the cursor on `node`.
+  --- @param node ExplorerNode
+  local function focus(node)
+    local line = line_of_node(node)
+    local win  = vim.fn.bufwinid(state.buffer.buf_id)
+    if not line or win == -1 then return end
+    vim.api.nvim_set_current_win(win)
+    vim.api.nvim_win_set_cursor(win, { line, 0 })
+    vim.cmd("normal! zz")
+  end
+
+  --- Expand the node at `path[1..depth]`, then continue one level deeper.
+  --- @param depth integer
+  local function descend(depth)
+    local node = node_at_path(vim.list_slice(path, 1, depth))
+    if not node then
+      vim.notify(('grannos: "%s" is not in the explorer tree'):format(table.concat(path, ".")),
+        vim.log.levels.WARN)
+      return
+    end
+    if depth == #path then
+      focus(node)
+    elseif node.children then
+      node.expanded = true
+      render()
+      descend(depth + 1)
+    else
+      load_children(node, false, function(err)
+        if not err then descend(depth + 1) end
+      end)
+    end
+  end
+
+  with_root(function(err)
+    if not err then descend(1) end
+  end)
+end
+
+--- Build the display lines, highlight rules, and title for an entity describe
+--- result. Exposed so other modules (e.g. the ambiguous-symbol picker) can
+--- preview one without opening the explorer's own float.
+--- @param details TableDetails
+--- @param node    { name: string, type: string }
+--- @return string[], HlRule[], string  lines, hl_rules, win_title
+M.render_describe = render_describe
 
 --- Open the table/view describe float for `details`, using `node` for its
 --- display name and icon. Exposed so other modules (e.g. the diagram viewer)

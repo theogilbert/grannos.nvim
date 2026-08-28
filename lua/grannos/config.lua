@@ -32,6 +32,9 @@ M.defaults = {
 
     -- Show execution info for the query under the cursor, in query buffers.
     query_info_key = "gK",
+
+    -- Reveal the symbol under the cursor in the schema explorer, in query buffers.
+    goto_symbol_key = "<C-]>",
   },
 
   -- When a driver has at most this many connections total, skip the group step

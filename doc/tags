@@ -1,6 +1,6 @@
 :DbAssociate	grannos.txt	/*:DbAssociate*
+:DbAttach	grannos.txt	/*:DbAttach*
 :DbCancelQuery	grannos.txt	/*:DbCancelQuery*
-:DbConnect	grannos.txt	/*:DbConnect*
 :DbConnections	grannos.txt	/*:DbConnections*
 :DbDeleteConnection	grannos.txt	/*:DbDeleteConnection*
 :DbDisconnect	grannos.txt	/*:DbDisconnect*
@@ -22,10 +22,13 @@ grannos-contents	grannos.txt	/*grannos-contents*
 grannos-decimal_separator	grannos.txt	/*grannos-decimal_separator*
 grannos-drivers	grannos.txt	/*grannos-drivers*
 grannos-explorer	grannos.txt	/*grannos-explorer*
+grannos-goto-symbol-key	grannos.txt	/*grannos-goto-symbol-key*
 grannos-hover-key	grannos.txt	/*grannos-hover-key*
 grannos-intro	grannos.txt	/*grannos-intro*
+grannos-messages	grannos.txt	/*grannos-messages*
 grannos-page_size	grannos.txt	/*grannos-page_size*
 grannos-queries_dir	grannos.txt	/*grannos-queries_dir*
+grannos-query-info-key	grannos.txt	/*grannos-query-info-key*
 grannos-query-log	grannos.txt	/*grannos-query-log*
 grannos-requirements	grannos.txt	/*grannos-requirements*
 grannos-results	grannos.txt	/*grannos-results*
@@ -37,9 +40,9 @@ grannos-setup	grannos.txt	/*grannos-setup*
 grannos-thousands_separator	grannos.txt	/*grannos-thousands_separator*
 grannos-write-protection	grannos.txt	/*grannos-write-protection*
 grannos.associate()	grannos.txt	/*grannos.associate()*
+grannos.attach()	grannos.txt	/*grannos.attach()*
 grannos.buffers_for()	grannos.txt	/*grannos.buffers_for()*
 grannos.cancel_query()	grannos.txt	/*grannos.cancel_query()*
-grannos.connect()	grannos.txt	/*grannos.connect()*
 grannos.disconnect()	grannos.txt	/*grannos.disconnect()*
 grannos.execute()	grannos.txt	/*grannos.execute()*
 grannos.execute_range()	grannos.txt	/*grannos.execute_range()*

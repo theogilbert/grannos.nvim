@@ -535,6 +535,9 @@ end
 ---   .get_title  fn(item)→string   right window title for the focused item (no surrounding spaces)
 ---   .render     fn(buf, item)     populate the right buffer for the focused item
 ---   .estimate   fn(item)→number   estimated rendered line count (for window sizing)
+---   .on_submit  fn(item|nil)|nil  called with the selected item when <CR> is pressed;
+---                                 the float is closed first, so a handler is free to
+---                                 open windows of its own
 ---   .conn_id       any|nil               connection to refetch from; with `.item_path`, enables
 ---                                        "r" to refresh the focused item
 ---   .item_path     fn(item)→string[]|nil leaf path to re-describe the focused item, or nil
@@ -606,13 +609,23 @@ function M.open_searchable_two_pane(opts)
     table.insert(extra_help, { lhs = "r", desc = "Refresh focused item (discard cache)", group = "Navigate" })
   end
 
-  local handle = M.open_search_list({
+  local handle
+
+  --- Close the float, then hand the selected item to the caller's on_submit.
+  --- @param item any|nil
+  local function submit(item)
+    handle.close()
+    opts.on_submit(item)
+  end
+
+  handle = M.open_search_list({
     items       = items,
     title       = opts.left_title,
     row0        = row0, col0 = col0, width = left_w, list_height = list_h,
     get_label   = opts.get_label,
     matches     = opts.matches,
     on_change   = sync,
+    on_submit   = opts.on_submit and submit or nil,
     extra_help  = extra_help,
   })
   handle.register_win(rwin)
@@ -683,6 +696,9 @@ function M.open_searchable_two_pane(opts)
   rmap("<C-c>", handle.close)
   rmap("<Tab>", focus_input)
   rmap("<C-h>", handle.show_help)
+  if opts.on_submit then
+    rmap("<CR>", function() submit(current_item) end)
+  end
   if can_refresh then
     rmap("r", refresh_current)
     -- Also reachable straight from the list pane (e.g. after a mouse click into it).

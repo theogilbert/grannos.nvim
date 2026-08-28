@@ -561,8 +561,9 @@ All keys are optional.
     connections_file = nil,   -- auto-detected from $XDG_CONFIG_HOME
     queries_dir      = nil,   -- auto-detected from $XDG_DATA_HOME
     keymaps = {
-      hover_key      = "K",
-      query_info_key = "gK",
+      hover_key       = "K",
+      query_info_key  = "gK",
+      goto_symbol_key = "<C-]>",
     },
     results = {
       split               = "below",
@@ -613,6 +614,16 @@ keymaps.query_info_key ~
   it is statement-scoped, so it works from any column of the statement,
   identifiers included. Press it again while the float is open to reopen
   that statement's results in the results pane.
+
+                                              *grannos-goto-symbol-key*
+keymaps.goto_symbol_key ~
+  Type: `string`   Default: `"<C-]>"`
+
+  Key inside a query buffer that reveals the symbol under the cursor in the
+  schema explorer: the sidebar opens (or is focused) for the buffer's
+  connection, the tree expands down to the node, and the cursor lands on it.
+  The symbol is resolved exactly as |grannos-hover-key| resolves it; when it
+  matches several nodes a |vim.ui.select()| prompt asks which one to jump to.
 
                                                    *grannos-results-split*
 results.split ~
