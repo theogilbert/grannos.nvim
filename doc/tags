@@ -12,6 +12,7 @@
 :DbRestart	grannos.txt	/*:DbRestart*
 :DbSaveQuery	grannos.txt	/*:DbSaveQuery*
 :DbStop	grannos.txt	/*:DbStop*
+:checkhealth-grannos	grannos.txt	/*:checkhealth-grannos*
 grannos-api	grannos.txt	/*grannos-api*
 grannos-commands	grannos.txt	/*grannos-commands*
 grannos-config	grannos.txt	/*grannos-config*
@@ -23,6 +24,7 @@ grannos-decimal_separator	grannos.txt	/*grannos-decimal_separator*
 grannos-drivers	grannos.txt	/*grannos-drivers*
 grannos-explorer	grannos.txt	/*grannos-explorer*
 grannos-goto-symbol-key	grannos.txt	/*grannos-goto-symbol-key*
+grannos-health	grannos.txt	/*grannos-health*
 grannos-hover-key	grannos.txt	/*grannos-hover-key*
 grannos-intro	grannos.txt	/*grannos-intro*
 grannos-messages	grannos.txt	/*grannos-messages*

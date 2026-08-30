@@ -18,6 +18,7 @@ CONTENTS                                                    *grannos-contents*
  10. Lua API ............................................ |grannos-api|
  11. Configuration ...................................... |grannos-config|
  12. Supported databases ................................ |grannos-drivers|
+ 13. Health check ....................................... |grannos-health|
 
 ================================================================================
 INTRODUCTION                                                   *grannos-intro*
@@ -220,6 +221,13 @@ COMMANDS                                                    *grannos-commands*
     Restart the server process. Equivalent to |:DbStop| followed by
     starting the server again. All state (open connections, buffer
     associations) is cleared.
+
+                                                     *:checkhealth-grannos*
+:checkhealth grannos
+    Verify the installation: that |grannos-server_cmd| points at a server
+    that starts and answers `capabilities` with a compatible protocol
+    version, and that everything else the plugin needs is in place.
+    See |grannos-health|.
 
 ================================================================================
 QUERY LOG                                               *grannos-query-log*
@@ -677,6 +685,40 @@ Refer to your server's documentation for the drivers it supports.
 
 For the protocol specification (wire format and methods) see
 docs/protocol.md.
+
+================================================================================
+HEALTH CHECK                                                  *grannos-health*
+
+Run |:checkhealth| grannos to verify the installation. It reports on:
+
+REQUIREMENTS ~
+    The running Neovim is 0.9 or later.
+
+CONFIGURATION ~
+    `require("grannos").setup()` has been called, where the connections
+    file and the queries directory resolve to, and whether the connections
+    file (if it exists) is valid JSON.
+
+BACKEND ~
+    The executable named by |grannos-server_cmd| exists and is runnable.
+    A short-lived server process is then started and asked for
+    `capabilities`; the check reports the server name it answers with, its
+    protocol version against the one this client expects, and the drivers
+    it makes available. A server that fails to start is reported with its
+    exit code and whatever it wrote to stderr, which is usually enough to
+    tell a missing install from a broken one.
+
+    This probe runs its own process and does not touch, or require, the
+    server started by |:DbAttach|.
+
+TREESITTER PARSERS ~
+    The `sql`, `cypher`, `promql` and `json` parsers used to find the
+    statement and the symbol under the cursor. The first three ship with
+    this plugin; `json` (used for MongoDB queries) comes with Neovim.
+
+OPTIONAL DEPENDENCIES ~
+    Whether fzf-lua is installed for the saved-query picker; without it
+    the picker falls back to `vim.ui.select`.
 
 ================================================================================
 vim:tw=78:ts=2:ft=help:norl:

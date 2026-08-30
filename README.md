@@ -23,6 +23,10 @@ Install a server backend, then install the plugin with your plugin manager:
 }
 ```
 
+Then run `:checkhealth grannos` to verify the install: it checks that the backend
+command exists, starts, and answers `capabilities` with a compatible protocol
+version, and reports the drivers it offers.
+
 ### Example configuration
 
 ```lua

@@ -27,7 +27,7 @@ describe("client exit handler", function()
   it("fires when the backend process exits and clears the running state", function()
     local calls = {}
     client.set_exit_handler(function(code) table.insert(calls, code) end)
-    client.start("exit 3")
+    client.start([[sh -c 'exit 3']])
     assert.is_true(client.is_running())
     vim.wait(5000, function() return #calls > 0 end, 20)
     client.set_exit_handler(nil)

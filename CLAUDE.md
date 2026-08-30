@@ -30,6 +30,7 @@ grannos.nvim is a Neovim database-client plugin that delegates all database work
 | `lua/grannos/connections.lua` | Reads/writes `connections.json`; connection CRUD wizards |
 | `lua/grannos/executor.lua` | Sends queries, dispatches results, manages gutter marks and log entries |
 | `lua/grannos/config.lua` | Plugin options with defaults |
+| `lua/grannos/health.lua` | `:checkhealth grannos`: verifies setup, backend install, protocol version, parsers |
 | `lua/grannos/buffer.lua` | Generic buffer class: content, keymaps, `g?` help float |
 | `lua/grannos/ui/connections.lua` | Connections panel (right sidebar) |
 | `lua/grannos/ui/explorer.lua` | Schema explorer (left sidebar) |

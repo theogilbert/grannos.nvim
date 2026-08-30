@@ -150,11 +150,45 @@ function M.set_exit_handler(fn)
   state.exit_handler = fn
 end
 
+--- Return the executable token of the shell command line `cmd`, or nil when the
+--- command is shell syntax (a pipeline, an env assignment, a substitution)
+--- whose executable cannot be determined by looking at the first word.
+--- @param cmd string|nil
+--- @return string|nil
+function M.executable_name(cmd)
+  local trimmed = vim.trim(cmd or "")
+  if trimmed == "" then return nil end
+  local quote = trimmed:sub(1, 1)
+  if quote == '"' or quote == "'" then
+    return trimmed:match("^" .. quote .. "([^" .. quote .. "]+)" .. quote)
+  end
+  local first = trimmed:match("^%S+")
+  if first:find("[|&;<>$`(){}*?=]") then return nil end
+  return first
+end
+
+--- Return a human-readable reason why `cmd` cannot be run, or nil when its
+--- executable is on disk (or the command is shell syntax we cannot inspect).
+--- Checked before spawning so a missing backend reports what is actually wrong
+--- instead of surfacing as the shell's exit code 127.
+--- @param cmd string
+--- @return string|nil
+function M.check_executable(cmd)
+  local name = M.executable_name(cmd)
+  if not name or vim.fn.executable(name) == 1 then return nil end
+  local what = name:find("/", 1, true)
+    and ("backend executable %q does not exist or is not executable"):format(name)
+    or ("backend command %q was not found in $PATH"):format(name)
+  return what .. ' — install the grannos backend, or set `server_cmd` to its path in require("grannos").setup()'
+end
+
 --- Start the backend process identified by `cmd`.
---- Errors if the process cannot be spawned (e.g. command not found).
+--- Errors if the executable is missing, or if the process cannot be spawned.
 --- @param cmd string  shell command to launch the backend
 function M.start(cmd)
   if state.job_id then return end
+  local problem = M.check_executable(cmd)
+  if problem then error(problem, 0) end
   local job_id = vim.fn.jobstart(cmd, {
     on_stdout = on_stdout,
     on_exit   = function(_, code, _)
@@ -167,7 +201,10 @@ function M.start(cmd)
         entry.cb("backend exited", nil)
       end
       if code == 127 then
-        vim.notify("`grannos` not found in PATH. Are you sure that it is correctly installed?", vim.log.levels.ERROR)
+        -- The shell could not find the command. The pre-flight check in start()
+        -- catches this for a plain command; a shell expression reaches here.
+        vim.notify(("grannos: %q could not be run — is the backend installed? See :checkhealth grannos"):format(cmd),
+          vim.log.levels.ERROR)
       elseif code ~= 0 then
         vim.notify(("grannos: backend exited with code %d"):format(code), vim.log.levels.ERROR)
       end
@@ -177,7 +214,7 @@ function M.start(cmd)
     stdout = "pipe",
   })
   if job_id <= 0 then
-    error(("grannos: failed to start %q — is it installed?"):format(cmd))
+    error(("failed to start %q — see :checkhealth grannos"):format(cmd), 0)
   end
   state.job_id = job_id
 end
