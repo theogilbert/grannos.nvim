@@ -25,20 +25,20 @@ INTRODUCTION                                                   *grannos-intro*
 
 grannos.nvim is a database client for Neovim. It delegates all database
 connectivity to an external server process, communicating with it over
-newline-delimited JSON on stdio (the belvedere protocol).
+newline-delimited JSON on stdio (the grannos protocol).
 
-Any server that implements the protocol can be used. belvedere-py is the
-reference implementation: https://github.com/belvedere/belvedere-py
+Any server that implements the protocol can be used. grannos-py is the
+reference implementation: https://github.com/theogilbert/grannos-py
 
 Connection parameters are stored in a JSON file on disk (not in the nvim
 config), so they persist across sessions and are shared between any client
-that speaks the belvedere protocol.
+that speaks the grannos protocol.
 
 ================================================================================
 REQUIREMENTS                                            *grannos-requirements*
 
 - Neovim 0.9 or later
-- A server that implements the belvedere protocol, on $PATH or configured
+- A server that implements the grannos protocol, on $PATH or configured
   via |grannos-server_cmd|. See your server's documentation for
   installation instructions and supported drivers.
 ================================================================================
@@ -565,7 +565,7 @@ All keys are optional.
 
 >lua
   require("grannos").setup({
-    server_cmd       = "belvedere",
+    server_cmd       = "grannos",
     connections_file = nil,   -- auto-detected from $XDG_CONFIG_HOME
     queries_dir      = nil,   -- auto-detected from $XDG_DATA_HOME
     keymaps = {
@@ -585,7 +585,7 @@ All keys are optional.
 
                                                        *grannos-server_cmd*
 server_cmd ~
-  Type: `string`   Default: `"belvedere"`
+  Type: `string`   Default: `"grannos"`
 
   Shell command used to launch the server process. Can include arguments.
 

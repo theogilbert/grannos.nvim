@@ -146,7 +146,7 @@ local function check_backend(entries, cmd)
   local problem = client.check_executable(cmd)
   if problem then
     add(entries, "error", problem, {
-      "Install a server that implements the belvedere protocol (e.g. belvedere-py).",
+      "Install a server that implements the grannos protocol (e.g. grannos-py).",
       'Then set `server_cmd` in require("grannos").setup({ server_cmd = "…" }) if it is not on $PATH.',
     })
     return

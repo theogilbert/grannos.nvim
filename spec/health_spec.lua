@@ -17,21 +17,21 @@ end
 
 describe("client.executable_name", function()
   it("returns the command itself", function()
-    assert.are.equal("belvedere", client.executable_name("belvedere"))
+    assert.are.equal("grannos", client.executable_name("grannos"))
   end)
 
   it("returns the first word of a command with arguments", function()
-    assert.are.equal("belvedere", client.executable_name("  belvedere --log -v  "))
+    assert.are.equal("grannos", client.executable_name("  grannos --log -v  "))
   end)
 
   it("returns a quoted path containing spaces", function()
-    assert.are.equal("/opt/my backend/belvedere",
-      client.executable_name([["/opt/my backend/belvedere" --log]]))
+    assert.are.equal("/opt/my backend/grannos",
+      client.executable_name([["/opt/my backend/grannos" --log]]))
   end)
 
   it("returns nil for shell syntax it cannot inspect", function()
-    assert.is_nil(client.executable_name("BELVEDERE_LOG=1 belvedere"))
-    assert.is_nil(client.executable_name("$HOME/bin/belvedere"))
+    assert.is_nil(client.executable_name("GRANNOS_LOG=1 grannos"))
+    assert.is_nil(client.executable_name("$HOME/bin/grannos"))
     assert.is_nil(client.executable_name(""))
     assert.is_nil(client.executable_name(nil))
   end)
@@ -55,7 +55,7 @@ describe("client.check_executable", function()
   end)
 
   it("reports a missing path differently from a missing $PATH lookup", function()
-    local msg = client.check_executable("/nonexistent/dir/belvedere")
+    local msg = client.check_executable("/nonexistent/dir/grannos")
     assert.is_not_nil(msg)
     assert.truthy(msg:match("does not exist or is not executable"))
   end)
@@ -105,7 +105,7 @@ describe("health.probe", function()
   end)
 
   it("reports a command that cannot be spawned", function()
-    local caps, err = health.probe("/nonexistent/dir/belvedere", 200)
+    local caps, err = health.probe("/nonexistent/dir/grannos", 200)
     assert.is_nil(caps)
     assert.is_not_nil(err)
   end)

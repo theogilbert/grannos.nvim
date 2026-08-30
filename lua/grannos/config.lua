@@ -16,7 +16,7 @@ end
 
 M.defaults = {
   -- Command used to launch the server backend.
-  server_cmd = "belvedere",  -- or "python -m belvedere"
+  server_cmd = "grannos",  -- or "python -m grannos"
 
   -- Path to the JSON file that stores named connections.
   -- Defaults to $XDG_CONFIG_HOME/grannos/connections.json

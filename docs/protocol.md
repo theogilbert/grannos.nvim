@@ -1,4 +1,4 @@
-# belvedere protocol
+# grannos protocol
 
 Communication between the **client** and the **server** uses newline-delimited JSON over stdio. The client spawns the server as a child process and communicates through its stdin/stdout pipes.
 
@@ -91,7 +91,7 @@ Only drivers whose dependencies are installed appear in the response.
 
 | Field              | Type                       | Description                                          |
 |--------------------|----------------------------|-------------------------------------------------------|
-| `server`           | string                     | Human-readable server name (e.g. `"belvedere"`)      |
+| `server`           | string                     | Human-readable server name (e.g. `"grannos"`)      |
 | `protocol_version` | string                     | Wire-protocol version as `"<major>.<minor>"` — see [Protocol versioning](#protocol-versioning) |
 | `drivers`          | array of [Driver](#driver) | Supported drivers                                     |
 
@@ -104,7 +104,7 @@ Only drivers whose dependencies are installed appear in the response.
 {
   "id": 1,
   "result": {
-    "server": "belvedere",
+    "server": "grannos",
     "protocol_version": "1.0",
     "drivers": [
       {

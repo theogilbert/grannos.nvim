@@ -5,9 +5,9 @@ A Neovim database client. Communicates with an external server backend over newl
 ## Requirements
 
 - Neovim 0.9+
-- A server backend implementing the [belvedere protocol](docs/protocol.md)
+- A server backend implementing the [grannos protocol](docs/protocol.md)
 
-[belvedere-py](https://github.com/theogilbert/dbelveder-py) is a reference server implementation.
+[grannos-py](https://github.com/theogilbert/grannos-py) is a reference server implementation.
 
 ## Installation
 
@@ -32,7 +32,7 @@ version, and reports the drivers it offers.
 ```lua
 -- plugins.lua
 require("grannos").setup({
-  server_cmd = "belvedere --log -v"
+  server_cmd = "grannos --log -v"
 })
 
 -- keymaps.lua
@@ -55,8 +55,8 @@ vim.keymap.set({"n", "v"}, "<leader>bl", grannos.load_query, { desc = "Data[b]as
 ```lua
 require("grannos").setup({
   -- Command used to launch the server backend.
-  -- Default: "belvedere" (assumes it is on $PATH).
-  server_cmd = "belvedere",
+  -- Default: "grannos" (assumes it is on $PATH).
+  server_cmd = "grannos",
 
   -- Override the path to the connections file.
   -- Default: $XDG_CONFIG_HOME/grannos/connections.json
@@ -286,7 +286,7 @@ The per-connection `allow_writes` flag is stored in `connections.json`. When set
 
 ```json
 {
-  "belvedere": {
+  "grannos": {
     "sqlite": {
       "label": "SQLite",
       "groups": {
@@ -388,7 +388,7 @@ local conns = require("grannos.connections")
 conns.load_all()
 
 -- Load connections for a specific server name.
-conns.load("belvedere")
+conns.load("grannos")
 
 -- Delete a connection by its internal key.
 conns.delete(key)
