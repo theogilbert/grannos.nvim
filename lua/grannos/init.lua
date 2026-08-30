@@ -124,11 +124,24 @@ function M.setup(opts)
 end
 
 
+-- Set while a teardown we initiated (:DbStop, :DbRestart) is in flight, so the
+-- exit handler stays quiet about a shutdown the user asked for.
+local expected_exit = false
+
+-- Set by :DbRestart: the new process can only be spawned once the old one's
+-- exit has actually been reported.
+local pending_restart = false
+
+-- Forward declaration; defined below, once clear_session_state is in scope.
+--- @type fun(code: integer)
+local on_backend_exit
+
 --- Start the backend if it isn't already running.
 --- Returns false (and notifies) if the process could not be spawned.
 --- @return boolean
 local function start_backend()
   if client.is_running() then return true end
+  client.set_exit_handler(on_backend_exit)
   local ok, err = pcall(client.start, config.options.server_cmd)
   if not ok then
     vim.notify("grannos: " .. tostring(err), vim.log.levels.ERROR)
@@ -564,14 +577,44 @@ function M.open_explorer()
   explorer.open(conn.conn_id, connections.conn_display_name(key), conn.driver, key, conn.driver_label)
 end
 
---- Stop the backend and clear all session state.
-local function teardown()
-  client.stop()  -- also resets capabilities cache
+--- Drop every piece of session state that belongs to a backend process: the
+--- open connections, the buffer associations pointing at them, and the
+--- explorer tree they populated. Idempotent.
+local function clear_session_state()
   state.conns = {}
   for _, bufnr in ipairs(vim.tbl_keys(state.buf_conns)) do
     set_buf_conn(bufnr, nil)
   end
   explorer.reset()
+  connections_panel.refresh()
+end
+
+--- Stop the backend and clear all session state.
+local function teardown()
+  expected_exit = true
+  client.stop()  -- also resets capabilities cache
+  clear_session_state()
+end
+
+--- Handle the backend process going away. Connection ids belong to the process
+--- that handed them out, so anything still holding one has to be dropped —
+--- otherwise every later request fails with "unknown conn id". Warns unless the
+--- exit is one the user asked for (`client` reports the exit code itself).
+--- @param _code integer  process exit code
+on_backend_exit = function(_code)
+  local had_conns = next(state.conns) ~= nil
+  clear_session_state()
+  if not expected_exit and had_conns then
+    vim.notify("grannos: open connections were closed with the backend — reconnect to continue",
+      vim.log.levels.WARN)
+  end
+  expected_exit = false
+  if pending_restart then
+    pending_restart = false
+    if start_backend() then
+      vim.notify("grannos: backend restarted", vim.log.levels.INFO)
+    end
+  end
 end
 
 --- Stop the backend process and notify the user.
@@ -582,8 +625,14 @@ end
 
 --- Restart the backend process (teardown then start).
 function M.restart()
+  local was_running = client.is_running()
   teardown()
-  if start_backend() then
+  if was_running then
+    -- jobstop only asks the process to exit; it is still "running" as far as
+    -- start_backend is concerned until its exit handler fires, so the new
+    -- process is spawned from there.
+    pending_restart = true
+  elseif start_backend() then
     vim.notify("grannos: backend restarted", vim.log.levels.INFO)
   end
 end

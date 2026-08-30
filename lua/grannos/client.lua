@@ -7,10 +7,11 @@
 local M = {}
 
 local state = {
-  job_id     = nil,
-  next_id    = 1,
-  pending    = {},  -- id → callback(err, result)
-  line_parts = {},  -- chunks of the partial line accumulated across on_stdout calls
+  job_id       = nil,
+  next_id      = 1,
+  pending      = {},  -- id → callback(err, result)
+  line_parts   = {},  -- chunks of the partial line accumulated across on_stdout calls
+  exit_handler = nil, -- fun(code: integer)|nil, called whenever the process exits
 }
 
 local caps_cache   = nil  -- cached capabilities result
@@ -140,6 +141,15 @@ function M.get_session(conn_id, callback)
   M.request("session.get", { connection_id = conn_id }, callback)
 end
 
+--- Register the function called whenever the backend process exits, however it
+--- exits: a crash, a kill, or a deliberate `stop()`. Every connection id the
+--- backend handed out dies with the process, so the handler is where the client
+--- drops the session state that referenced them. Replaces any previous handler.
+--- @param fn fun(code: integer)|nil
+function M.set_exit_handler(fn)
+  state.exit_handler = fn
+end
+
 --- Start the backend process identified by `cmd`.
 --- Errors if the process cannot be spawned (e.g. command not found).
 --- @param cmd string  shell command to launch the backend
@@ -161,6 +171,7 @@ function M.start(cmd)
       elseif code ~= 0 then
         vim.notify(("grannos: backend exited with code %d"):format(code), vim.log.levels.ERROR)
       end
+      if state.exit_handler then state.exit_handler(code) end
     end,
     stdin  = "pipe",
     stdout = "pipe",
