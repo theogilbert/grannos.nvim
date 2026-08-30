@@ -873,8 +873,13 @@ A table (`kind: "table"`) is likewise typically covered by several regions: its 
 | `row`       | integer          | 0-indexed line number within `diagram`                                       |
 | `col_start` | integer          | 0-indexed byte offset where the span starts                                  |
 | `col_end`   | integer          | 0-indexed byte offset where the span ends (exclusive)                        |
-| `kind`      | string           | `"table"`, `"column"`, or `"edge"` — discriminates what `path` names, without the client having to infer it from `path`'s shape |
-| `path`      | array of strings | Path to pass as `explore.describe`'s `path` param to describe this table, column, or relationship |
+| `kind`      | string           | `"table"`, `"column"`, `"columns"`, or `"edge"` — discriminates what `path` names, without the client having to infer it from `path`'s shape |
+| `path`      | array of strings | Path to pass as `explore.describe`'s `path` param to describe this table, column, column list, or relationship |
+
+A box with no room to list every column ends its body with a `...` row standing in for the rest. That row is a single `kind: "columns"` region — plural, because it names the whole set of columns rather than any one of them — whose `path` is the columns **group** path (`[..., "columns"]`, one segment shorter than a real column's `[..., "columns", <name>]`). `kind` is the only reliable discriminator here: a table may itself have a column named `columns`, whose leaf path `[..., "columns", "columns"]` also ends in that segment, so a client must not infer the difference from `path`'s shape. Since the group path does not resolve on its own for SQL drivers (an entity's fields live on the entity's own describe result), a client should describe the parent entity and browse its `properties`, exactly as it does for the explorer's `columns` group node.
+
+*(Added in protocol 1.1. Servers before that tagged this row `kind: "column"`, leaving the ambiguity above unresolved.)*
+
 
 ---
 

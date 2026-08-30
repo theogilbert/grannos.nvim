@@ -685,11 +685,7 @@ local function on_describe()
       render()
       local details = result.details
       if is_columns_group then
-        local p = node.path
-        local parts = vim.list_slice(p, 1, #p - 1)
-        local ctx = table.concat(parts, ".")
-        local title = ctx ~= "" and (" Columns · " .. ctx .. " ") or " Columns "
-        require("grannos.ui.column").open(details, title, state.conn_id, node.path)
+        require("grannos.ui.column").open_group(details, node.path, state.conn_id)
       elseif is_array(details) then
         local p = node.path
         local parts = vim.list_slice(p, 1, #p - 1)

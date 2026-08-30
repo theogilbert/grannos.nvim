@@ -16,7 +16,7 @@ local BORDER_PATTERN = "[┌┐└┘─│├┬┴┼→]+"
 -- sits inside a table's interior row). Higher wins, regardless of call order —
 -- deliberately not relying on nvim_buf_add_highlight's implicit "last extmark
 -- inserted wins" behavior for same-priority overlaps.
-local PRIORITY = { border = 100, table = 110, edge = 110, column = 120 }
+local PRIORITY = { border = 100, table = 110, edge = 110, column = 120, columns = 120 }
 
 --- Dim the box-drawing/connector characters in `lines` so they recede behind the
 --- table and column names highlighted via `apply_regions`.
@@ -172,7 +172,7 @@ local function region_hl_group(region, table_colors)
   if kind == nil then
     kind = (#region.path >= 2 and region.path[#region.path - 1] == "columns") and "column" or "table"
   end
-  if kind == "column" then return "GrannosExplorerColumn" end
+  if kind == "column" or kind == "columns" then return "GrannosExplorerColumn" end
   if kind == "table" then
     return table_colors[path_key(region.path)] or "GrannosExplorerTable"
   end
@@ -196,6 +196,23 @@ local function apply_regions(buf, regions, table_colors)
     vim.hl.range(buf, NS_ID, region_hl_group(region, table_colors),
       { region.row, region.col_start }, { region.row, region.col_end }, { priority = priority })
   end
+end
+
+--- Whether a region is the "..." columns-group row as emitted by servers older
+--- than protocol 1.1, which tagged it `kind = "column"` and left only the path
+--- to tell it apart from a leaf column. The path alone is ambiguous — a table
+--- may have a column literally named `columns`, whose leaf path
+--- (`[..., "columns", "columns"]`) also ends in `columns` — so this additionally
+--- requires the preceding segment to be the entity's own name, which is what
+--- 1.1's dedicated `kind = "columns"` settles outright.
+--- @param region table  DiagramRegion object: { row, col_start, col_end, kind, path }
+--- @return boolean
+local function is_legacy_columns_group(region)
+  local path = region.path
+  return region.kind == "column"
+    and #path >= 2
+    and path[#path] == "columns"
+    and path[#path - 1] ~= "columns"
 end
 
 --- Find the region under a 0-indexed (row, col) cursor position, if any.
@@ -272,7 +289,9 @@ function M.open(conn_id, path, title, conn_key)
   --- Handle the hover key: resolve the region(s) under the cursor and describe
   --- them. When the cursor sits on more than one distinct relationship at once
   --- (e.g. a shared trunk column at a branch point), describes all of them and
-  --- opens a browsable picker instead of arbitrarily picking one.
+  --- opens a browsable picker instead of arbitrarily picking one. A box's
+  --- "..." row -- the stand-in for the columns it has no room to list --
+  --- opens the two-pane columns browser for that table.
   local function on_hover()
     local cursor = vim.api.nvim_win_get_cursor(0)
     local row, col = cursor[1] - 1, cursor[2]
@@ -318,7 +337,18 @@ function M.open(conn_id, path, title, conn_key)
     local region = region_at(regions, row, col)
     if not region then return end
 
-    client.request("explore.describe", { connection_id = conn_id, path = region.path }, function(err, result)
+    -- `kind == "columns"` marks the "..." row standing in for the columns a box
+    -- had no room to list; its path is the columns *group* path. Hovering it
+    -- opens the same picker the explorer's "columns" group node does, via the
+    -- shared `column.open_group`. That group path doesn't resolve on its own --
+    -- an entity's fields live on the entity's describe result -- so the describe
+    -- request goes to the owning entity, exactly as the explorer's redirect does.
+    local is_columns_group = region.kind == "columns" or is_legacy_columns_group(region)
+    local describe_path    = is_columns_group
+      and vim.list_slice(region.path, 1, #region.path - 1)
+      or region.path
+
+    client.request("explore.describe", { connection_id = conn_id, path = describe_path }, function(err, result)
       vim.schedule(function()
         if err then
           vim.notify("grannos: " .. err, vim.log.levels.ERROR)
@@ -329,7 +359,9 @@ function M.open(conn_id, path, title, conn_key)
           vim.notify("grannos: nothing to describe here", vim.log.levels.WARN)
           return
         end
-        if details.type == "field" then
+        if is_columns_group then
+          require("grannos.ui.column").open_group(details, region.path, conn_id)
+        elseif details.type == "field" then
           require("grannos.ui.column").open_single(details, conn_id, region.path)
         elseif details.type == "relationship" then
           require("grannos.ui.relationship").open_single(details, region_hl_group(region, table_colors), conn_id, region.path)

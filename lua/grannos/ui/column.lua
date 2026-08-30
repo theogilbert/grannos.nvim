@@ -172,6 +172,21 @@ function M.open(details, title, conn_id, group_path)
   })
 end
 
+--- Open the two-pane columns browser for a columns *group* node, deriving the
+--- left pane's title from the group path's own ancestry. The single entry point
+--- for "describe the columns group", so every caller — the explorer's `columns`
+--- group node and the diagram's "..." row alike — renders an identical picker.
+--- An entity's fields live on the entity's describe result rather than on the
+--- group path, so callers describe the parent path and pass that
+--- EntityDescription here.
+--- @param details    table     EntityDescription for the group's parent entity
+--- @param group_path string[]  path to the columns group node (e.g. `[..., "columns"]`)
+--- @param conn_id    any|nil   connection to refetch from; enables "r" to refresh the focused column
+function M.open_group(details, group_path, conn_id)
+  local ctx = table.concat(vim.list_slice(group_path, 1, #group_path - 1), ".")
+  M.open(details, ctx ~= "" and (" Columns · " .. ctx .. " ") or " Columns ", conn_id, group_path)
+end
+
 --- Build condensed hover lines for a column: name, type/constraints, comment.
 --- A shorter view than `render()`, which also lists defaults, indices, and samples.
 --- @param col table  FieldDescription
