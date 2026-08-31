@@ -451,7 +451,9 @@ local function show_source_query(buf_state)
   end
 end
 
---- Open `content` in a new unnamed, listed buffer in a new tab so the user can inspect or :w it.
+--- Open `content` in a new unnamed, listed buffer in a vertical split of the results
+--- window it was exported from, so the export stays next to the results it came from.
+--- Falls back to splitting the current window when that results window is gone.
 --- @param content  string  newline-joined export text
 --- @param filetype string  Neovim filetype to assign, or "" for none
 local function open_export_buffer(content, filetype)
@@ -459,7 +461,11 @@ local function open_export_buffer(content, filetype)
   local buf   = vim.api.nvim_create_buf(true, false)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   if filetype ~= "" then vim.bo[buf].filetype = filetype end
-  vim.cmd("tab sbuffer " .. buf)
+  local win_id = current_results_win()
+  if win_id and vim.api.nvim_win_is_valid(win_id) then
+    vim.api.nvim_set_current_win(win_id)
+  end
+  vim.cmd("vertical sbuffer " .. buf)
 end
 
 --- Prompt for an export format and open the full (unpaginated) result set in a scratch buffer.
