@@ -8,6 +8,9 @@
 -- listed so the user can still :b back to it.
 -- Buffers are listed so the user can :b between them.
 -- One results window per tab: running a query in tab A never clobbers tab B.
+-- Within a tab, a results buffer already displayed in some window is refreshed
+-- there rather than being moved into the tab's last-used results window, so
+-- panes the user has split off for particular connections stay put.
 local Buffer         = require("grannos.buffer")
 local table_fmt      = require("grannos.table")
 local hl             = require("grannos.hl")
@@ -345,10 +348,33 @@ local function open_win(buf_id)
   vim.api.nvim_set_current_win(prev_win)
 end
 
---- Open the results window for the current tab if closed; otherwise swap the buffer.
+--- Return a non-floating window in the current tab already displaying `buf_id`, or nil.
+--- Lets a results buffer the user has moved into a window of their own keep that
+--- window, instead of being re-displayed in the tab's last-used results window.
+--- @param buf_id integer
+--- @return integer|nil
+local function win_showing(buf_id)
+  for _, win_id in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    if vim.api.nvim_win_get_buf(win_id) == buf_id
+      and vim.api.nvim_win_get_config(win_id).relative == "" then
+      return win_id
+    end
+  end
+  return nil
+end
+
+--- Show `buf_id` in the window already displaying it, else the current tab's results
+--- window, else a new split. The window the buffer ends up in becomes the tab's
+--- results window, so the scroll/reset helpers act on the pane that got the content.
 --- @param buf_id integer
 local function ensure_win(buf_id)
-  local tab    = vim.api.nvim_get_current_tabpage()
+  local tab      = vim.api.nvim_get_current_tabpage()
+  local existing = win_showing(buf_id)
+  if existing then
+    state.win_ids[tab] = existing
+    ensure_win_setup(existing)
+    return
+  end
   local win_id = state.win_ids[tab]
   if win_id and vim.api.nvim_win_is_valid(win_id) then
     vim.api.nvim_win_set_buf(win_id, buf_id)
