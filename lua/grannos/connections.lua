@@ -462,10 +462,15 @@ end
 --- unedited case may be reporting a password the client never even sees the
 --- plaintext of (requires_password with no stored value) — there's no real
 --- length to reflect, so a fixed width avoids implying one.
---- @param pw_param  table|nil
---- @param had_value boolean
+--- `remembered` seeds the "Remember password" toggle: true when the connection
+--- already keeps its password in `connections.json`, so the form reports how the
+--- password is actually stored instead of always starting unchecked (unchecking
+--- it on submit then stops storing the password and reverts to prompting).
+--- @param pw_param   table|nil
+--- @param had_value  boolean
+--- @param remembered boolean
 --- @return table[]  empty when there is no secret param for this driver
-local function make_password_fields(pw_param, had_value)
+local function make_password_fields(pw_param, had_value, remembered)
   if not pw_param then return {} end
   local PW_MASK = "********"
   local raw, edited = "", false
@@ -481,7 +486,39 @@ local function make_password_fields(pw_param, had_value)
     edit_prefill = function() return "" end,
     commit_text  = function(v) raw = v or ""; edited = true end,
   }
-  return { pw_field, make_toggle_field("remember_password", "Remember password", false) }
+  return { pw_field, make_toggle_field("remember_password", "Remember password", remembered) }
+end
+
+--- Resolve the password-related connection params for an edit/clone submit, from
+--- the stored connection and the form's raw values. An edited, non-empty password
+--- field wins over the stored one; leaving it unedited keeps whatever is there.
+--- The "Remember password" toggle then decides where that password lives: checked
+--- stores it in `connections.json`, unchecked drops it from the file and flags the
+--- connection as one to prompt for (the resolved password is still returned, so the
+--- current session connects without a second prompt).
+--- @param pw_key  string|nil  the secret param's key, or nil for drivers without one
+--- @param current table       the connection's existing params
+--- @param values  table       raw values gathered from the form
+--- @return table      password params to persist ({ [pw_key], requires_password })
+--- @return string|nil the password to connect with, or nil when none is known
+local function resolve_password_params(pw_key, current, values)
+  local stored = pw_key and current[pw_key]
+  if stored == vim.NIL or stored == "" then stored = nil end
+  local pw_result = (pw_key and values[pw_key]) or { edited = false, raw = "" }
+  local typed = (pw_result.edited and pw_result.raw ~= "") and pw_result.raw or nil
+  local pw = typed or stored
+
+  local out = {}
+  if values.remember_password and pw then
+    out[pw_key] = pw
+    out.requires_password = false
+  elseif values.remember_password then
+    -- Nothing to store: the connection only ever prompts for its password.
+    out.requires_password = current.requires_password or false
+  else
+    out.requires_password = pw ~= nil or current.requires_password or false
+  end
+  return out, pw
 end
 
 --- Build the params table to send to the backend's `connect` method from the
@@ -775,7 +812,7 @@ function M.create(caps, callback, defaults)
 
     local fields = { make_name_field(nil), make_group_field(server, driver, defaults.group) }
     for _, p in ipairs(dfields) do table.insert(fields, driver_param_field(p, nil)) end
-    vim.list_extend(fields, make_password_fields(pw_param, false))
+    vim.list_extend(fields, make_password_fields(pw_param, false, false))
 
     require("grannos.ui.conn_form").open({
       title     = "New Connection",
@@ -855,12 +892,12 @@ function M.edit(key, caps, callback)
   local driver_label  = resolve_driver_label(caps, server, driver)
   local dfields, pw_param = driver_fields(caps, driver)
   local pw_key = pw_param and pw_param.key
-  local had_password = (pw_key and current[pw_key] ~= nil and current[pw_key] ~= vim.NIL)
-    or current.requires_password
+  local stored_password = (pw_key and current[pw_key] ~= nil and current[pw_key] ~= vim.NIL) or false
+  local had_password = stored_password or current.requires_password
 
   local fields = { make_name_field(name), make_group_field(server, driver, group) }
   for _, p in ipairs(dfields) do table.insert(fields, driver_param_field(p, current)) end
-  vim.list_extend(fields, make_password_fields(pw_param, had_password))
+  vim.list_extend(fields, make_password_fields(pw_param, had_password, stored_password))
   if driver_supports_writes(caps, driver) then
     table.insert(fields, make_toggle_field("allow_writes", "Always allow write operations", current.allow_writes))
   end
@@ -881,27 +918,13 @@ function M.edit(key, caps, callback)
         return
       end
 
-      local params = { requires_password = current.requires_password or false }
+      local params = {}
       for _, p in ipairs(dfields) do params[p.key] = values[p.key] end
       coerce_integer_fields(dfields, params)
       params.allow_writes = values.allow_writes and true or nil
 
-      local pw_result = (pw_key and values[pw_key]) or { edited = false, raw = "" }
-      local pw = (pw_result.edited and pw_result.raw ~= "") and pw_result.raw or nil
-      if pw then
-        if values.remember_password then
-          params[pw_key] = pw; params.requires_password = false
-        else
-          params.requires_password = true
-        end
-      else
-        if pw_key and current[pw_key] then
-          params[pw_key] = current[pw_key]; params.requires_password = false
-        else
-          params.requires_password = current.requires_password
-        end
-        pw = pw_key and current[pw_key]
-      end
+      local pw_params, pw = resolve_password_params(pw_key, current, values)
+      params = vim.tbl_extend("force", params, pw_params)
 
       local data2 = read_data()
       if not data2 then done("failed to read the connections file"); return end
@@ -939,12 +962,12 @@ function M.clone(source_key, new_name, caps, callback)
   local driver_label  = resolve_driver_label(caps, server, driver)
   local dfields, pw_param = driver_fields(caps, driver)
   local pw_key = pw_param and pw_param.key
-  local had_password = (pw_key and current[pw_key] ~= nil and current[pw_key] ~= vim.NIL)
-    or current.requires_password
+  local stored_password = (pw_key and current[pw_key] ~= nil and current[pw_key] ~= vim.NIL) or false
+  local had_password = stored_password or current.requires_password
 
   local fields = { make_name_field(new_name), make_group_field(server, driver, group) }
   for _, p in ipairs(dfields) do table.insert(fields, driver_param_field(p, current)) end
-  vim.list_extend(fields, make_password_fields(pw_param, had_password))
+  vim.list_extend(fields, make_password_fields(pw_param, had_password, stored_password))
 
   require("grannos.ui.conn_form").open({
     title     = "Clone Connection",
@@ -963,29 +986,12 @@ function M.clone(source_key, new_name, caps, callback)
         return
       end
 
-      local params = {
-        requires_password = current.requires_password or false,
-        allow_writes       = current.allow_writes,
-      }
+      local params = { allow_writes = current.allow_writes }
       for _, p in ipairs(dfields) do params[p.key] = values[p.key] end
       coerce_integer_fields(dfields, params)
 
-      local pw_result = (pw_key and values[pw_key]) or { edited = false, raw = "" }
-      local pw = (pw_result.edited and pw_result.raw ~= "") and pw_result.raw or nil
-      if pw then
-        if values.remember_password then
-          params[pw_key] = pw; params.requires_password = false
-        else
-          params.requires_password = true
-        end
-      else
-        if pw_key and current[pw_key] then
-          params[pw_key] = current[pw_key]; params.requires_password = false
-        else
-          params.requires_password = current.requires_password
-        end
-        pw = pw_key and current[pw_key]
-      end
+      local pw_params, pw = resolve_password_params(pw_key, current, values)
+      params = vim.tbl_extend("force", params, pw_params)
 
       local data2 = read_data()
       if not data2 then done("failed to read the connections file"); return end
