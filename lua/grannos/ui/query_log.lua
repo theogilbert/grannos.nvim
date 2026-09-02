@@ -36,7 +36,8 @@ local function format_entry_line(entry, content_w)
   local status  = entry.status == "error"   and "✗ "
                or entry.status == "running" and "… "
                or "  "
-  local time_s  = os.date("%H:%M:%S", entry.timestamp)
+  -- Entries are kept for a rolling 7-day window, so the year is never ambiguous.
+  local time_s  = os.date("%m-%d %H:%M:%S", entry.timestamp)
   local line_s  = ("ln:%-4d"):format((entry.source_line or 0) + 1)
   local prefix  = status .. time_s .. "  " .. line_s .. "  "
   local sql_one = vim.trim(entry.sql:gsub("%s+", " "))
