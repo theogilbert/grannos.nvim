@@ -199,6 +199,19 @@ describe("completion.omnifunc", function()
     assert.same({ "", "public\0users\0columns" }, requests)
   end)
 
+  it("claims omnifunc back when the filetype is set after the connection", function()
+    -- A scratch query buffer: associated first, `:set ft=sql` afterwards.
+    -- Vim's own ftplugin points omnifunc at sqlcomplete#Complete on FileType,
+    -- so losing this race means <C-x><C-o> silently offers SQL keywords.
+    require("grannos.completion").setup()
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_set_current_buf(buf)
+    completion.attach(buf, "conn")
+    assert.equals("", vim.bo[buf].omnifunc)
+    vim.bo[buf].filetype = "sql"
+    assert.equals("v:lua.require'grannos.completion'.omnifunc", vim.bo[buf].omnifunc)
+  end)
+
   it("never sends explore.describe — it reads user data", function()
     complete({ "SELECT | FROM public.users u JOIN public.orders o ON o.id = u.id" })
     for _, key in ipairs(requests) do

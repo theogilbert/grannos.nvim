@@ -447,6 +447,12 @@ what is already known and fills the popup in as the answer arrives.
 
 Set |grannos-completion-enabled| to false to turn this off.
 
+If |i_CTRL-X_CTRL-O| offers SQL keywords rather than your schema, the buffer
+has no connection: 'omnifunc' is still Vim's own `sqlcomplete#Complete`. Check
+with `:set omnifunc?` — an attached buffer reads
+`v:lua.require'grannos.completion'.omnifunc`. Associate one with
+|:DbAssociate| or |:DbAttach|.
+
 ================================================================================
 LUA API                                                          *grannos-api*
 

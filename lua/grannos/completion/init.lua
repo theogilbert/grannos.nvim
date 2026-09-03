@@ -249,18 +249,34 @@ function M.omnifunc(findstart, base)
   return candidates(conn_id, ctx, base, M._refiller(bufnr, row, start_col, conn_id, ctx, 1))
 end
 
+local OMNIFUNC = "v:lua.require'grannos.completion'.omnifunc"
+
+--- Claim 'omnifunc' for `bufnr` when its language is one this completes.
+--- Separate from `attach` because a buffer can gain a connection before it has
+--- a filetype — a scratch query buffer is associated and only then set to
+--- `sql` — and because Vim's own ftplugin points 'omnifunc' at
+--- `sqlcomplete#Complete` every time the filetype is set, which would
+--- otherwise take the slot back and quietly answer with keyword completion.
+--- @param bufnr integer
+--- @return boolean  whether omnifunc is now ours
+local function enable(bufnr)
+  if not vim.api.nvim_buf_is_valid(bufnr) then return false end
+  local ok, parser = pcall(vim.treesitter.get_parser, bufnr)
+  if not ok or not parser or parser:lang() ~= "sql" then return false end
+  vim.bo[bufnr].omnifunc = OMNIFUNC
+  return true
+end
+
 --- Attach completion to `bufnr` for connection `conn_key`.
---- A no-op for buffers whose language has no extractor here (only SQL so far)
---- and when completion is disabled in config.
+--- The association is recorded even when 'omnifunc' cannot be claimed yet; the
+--- FileType handler registered by `setup` claims it as soon as the buffer
+--- becomes SQL. A no-op when completion is disabled in config.
 --- @param bufnr    integer
 --- @param conn_key string
 function M.attach(bufnr, conn_key)
   if not config.options.completion.enabled then return end
-  local ok, parser = pcall(vim.treesitter.get_parser, bufnr)
-  if not ok or not parser or parser:lang() ~= "sql" then return end
-
   attached[bufnr] = conn_key
-  vim.bo[bufnr].omnifunc = "v:lua.require'grannos.completion'.omnifunc"
+  if not enable(bufnr) then return end
 
   -- One list call, so the tree's shape and its top level are known before the
   -- first keystroke that needs them.
@@ -268,12 +284,25 @@ function M.attach(bufnr, conn_key)
   if conn then cache.children(conn.conn_id, {}) end
 end
 
+--- Register the FileType handler that re-claims 'omnifunc' on connected
+--- buffers. Called once from `grannos.setup()`.
+function M.setup()
+  vim.api.nvim_create_autocmd("FileType", {
+    group    = vim.api.nvim_create_augroup("GrannosCompletion", { clear = true }),
+    callback = function(args)
+      if attached[args.buf] and vim.bo[args.buf].omnifunc ~= OMNIFUNC then
+        enable(args.buf)
+      end
+    end,
+  })
+end
+
 --- Detach completion from `bufnr`.
 --- @param bufnr integer
 function M.detach(bufnr)
   if attached[bufnr] == nil then return end
   attached[bufnr] = nil
-  if vim.api.nvim_buf_is_valid(bufnr) and vim.bo[bufnr].omnifunc:find("grannos", 1, true) then
+  if vim.api.nvim_buf_is_valid(bufnr) and vim.bo[bufnr].omnifunc == OMNIFUNC then
     vim.bo[bufnr].omnifunc = ""
   end
 end

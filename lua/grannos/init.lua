@@ -118,6 +118,7 @@ function M.setup(opts)
   config.setup(opts)
   hl.setup()
   gutter.setup()
+  require("grannos.completion").setup()
   conn_label.setup(function(bufnr)
     if state.silent_bufs[bufnr] then return nil end
     local name = state.buf_conns[bufnr]
