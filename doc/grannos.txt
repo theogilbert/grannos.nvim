@@ -15,10 +15,11 @@ CONTENTS                                                    *grannos-contents*
   7. Saved queries ...................................... |grannos-saved-queries|
   8. Explorer ........................................... |grannos-explorer|
   9. Results window ..................................... |grannos-results|
- 10. Lua API ............................................ |grannos-api|
- 11. Configuration ...................................... |grannos-config|
- 12. Supported databases ................................ |grannos-drivers|
- 13. Health check ....................................... |grannos-health|
+ 10. Completion ......................................... |grannos-completion|
+ 11. Lua API ............................................ |grannos-api|
+ 12. Configuration ...................................... |grannos-config|
+ 13. Supported databases ................................ |grannos-drivers|
+ 14. Health check ....................................... |grannos-health|
 
 ================================================================================
 INTRODUCTION                                                   *grannos-intro*
@@ -338,6 +339,11 @@ KEYMAPS ~
           server (column types, index fields, etc.) and displays it in a
           floating window. Press q or <Esc> to close.
 
+          Inside a table's describe float, K on a row of the column table
+          opens that column's own detail float on top — defaults, indices,
+          foreign keys, and sample values. Press q or <Esc> to close it and
+          return to the table.
+
   R       Refresh the entire tree from the server, bypassing the
           server-side schema cache.
 
@@ -401,6 +407,45 @@ KEYMAPS ~
   ]       Go to the next page of results.
   q       Close the results window.
   g?      Show a keymap reference float.
+
+================================================================================
+COMPLETION                                                *grannos-completion*
+
+A SQL buffer associated with a connection gets 'omnifunc' set, so |i_CTRL-X_CTRL-O|
+completes database names in place. No completion plugin is required; any
+engine that wraps 'omnifunc' picks this up automatically.
+
+What is offered depends on where the cursor sits:
+
+  after FROM / JOIN / INTO / UPDATE
+          Table and view names. Unqualified, schema names are offered too;
+          after `schema.`, only that schema's tables.
+
+  after `alias.` or `table.`
+          The columns of whatever that qualifier binds to, resolved through
+          the statement's FROM/JOIN clauses exactly as |grannos-hover-key|
+          resolves it.
+
+  anywhere a bare column resolves
+          SELECT, WHERE, ON, GROUP BY, HAVING, ORDER BY, UPDATE ... SET, and
+          an INSERT column list: the columns of every source in scope, each
+          annotated with its type and the alias it came from, plus the
+          aliases themselves.
+
+Candidates are filtered by what has been typed, case-insensitively.
+
+IMPACT ON THE DATABASE ~
+
+Completion only ever sends `explore.list`, never `explore.describe`: it reads
+the catalog and never user table data. Each listing is fetched once and cached
+by the server permanently, so a database sees one catalog query per schema or
+table actually completed against, and nothing at all thereafter — a whole
+session of editing typically costs a handful of queries in total.
+
+Nothing blocks on the network. A lookup that has not been fetched yet returns
+what is already known and fills the popup in as the answer arrives.
+
+Set |grannos-completion-enabled| to false to turn this off.
 
 ================================================================================
 LUA API                                                          *grannos-api*
@@ -580,6 +625,10 @@ All keys are optional.
       thousands_separator = "_",
       decimal_separator   = ".",
     },
+    completion = {
+      enabled         = true,
+      max_schema_scan = 5,
+    },
   })
 <
 
@@ -595,6 +644,25 @@ connections_file ~
 
   Path to the JSON file where connections are stored. The directory is
   created automatically on first save.
+
+                                              *grannos-completion-enabled*
+completion.enabled ~
+  Type: `boolean`   Default: `true`
+
+  Set 'omnifunc' on SQL buffers that have a connection, so |i_CTRL-X_CTRL-O|
+  completes table and column names. See |grannos-completion|. Set to false
+  to leave 'omnifunc' alone.
+
+                                      *grannos-completion-max_schema_scan*
+completion.max_schema_scan ~
+  Type: `number`   Default: `5`
+
+  How many schemas may be listed to offer table names for a reference that
+  names no schema. A connection with more schemas than this offers schema
+  names alone, so completing an unqualified table position can never turn
+  one keystroke into a listing per schema; writing `schema.` always lists
+  just that one. Raise it for a database with many small schemas you query
+  across; the cost is one catalog query per schema, once per session.
 
                                                       *grannos-queries_dir*
 queries_dir ~

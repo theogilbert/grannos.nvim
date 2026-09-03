@@ -15,6 +15,9 @@
 :checkhealth-grannos	grannos.txt	/*:checkhealth-grannos*
 grannos-api	grannos.txt	/*grannos-api*
 grannos-commands	grannos.txt	/*grannos-commands*
+grannos-completion	grannos.txt	/*grannos-completion*
+grannos-completion-enabled	grannos.txt	/*grannos-completion-enabled*
+grannos-completion-max_schema_scan	grannos.txt	/*grannos-completion-max_schema_scan*
 grannos-config	grannos.txt	/*grannos-config*
 grannos-connections	grannos.txt	/*grannos-connections*
 grannos-connections-api	grannos.txt	/*grannos-connections-api*

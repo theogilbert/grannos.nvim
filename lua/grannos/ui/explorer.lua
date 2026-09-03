@@ -317,7 +317,17 @@ local function open_describe_float(details, node, conn_id, path)
     vim.notify("grannos: nothing to describe for this node", vim.log.levels.WARN)
     return
   end
-  local handle = present_describe_float(render_describe(details, node))
+  local lines, hl_rules, win_title, col_rows = render_describe(details, node)
+  local handle = present_describe_float(lines, hl_rules, win_title)
+
+  -- The hover key on a row of the properties table opens that column's own
+  -- detail float on top of this one — same view the explorer gives for a
+  -- column node, but the FieldDescription is already in hand, so no request.
+  -- Reassigned by refresh below, so the closure always reads the current rows.
+  vim.keymap.set("n", config.options.keymaps.hover_key, function()
+    local col = col_rows[vim.api.nvim_win_get_cursor(0)[1]]
+    if col then require("grannos.ui.column").open_single(col) end
+  end, { buffer = handle.buf, nowait = true, silent = true })
 
   if conn_id and path then
     local refreshing = false
@@ -336,7 +346,8 @@ local function open_describe_float(details, node, conn_id, path)
             vim.notify("grannos: " .. err, vim.log.levels.ERROR)
             return
           end
-          local new_lines, new_hls, new_title = render_describe(new_details, node)
+          local new_lines, new_hls, new_title, new_col_rows = render_describe(new_details, node)
+          col_rows = new_col_rows
           local width, height = calculate_win_size(new_lines)
           vim.bo[handle.buf].modifiable = true
           vim.api.nvim_buf_set_lines(handle.buf, 0, -1, false, new_lines)
@@ -356,13 +367,18 @@ local function open_describe_float(details, node, conn_id, path)
   end
 end
 
---- Return display lines, highlight rules, and window title for a describe float (pure).
+--- Return display lines, highlight rules, window title, and the field each row
+--- of the properties table renders, for a describe float (pure).
 --- @param details TableDetails
 --- @param node    ExplorerNode
---- @return string[], HlRule[], string  lines, hl_rules, win_title
+--- @return string[], HlRule[], string, table<integer, table>  lines, hl_rules, win_title, col_rows
 render_describe = function(details, node)
   local lines    = {}
   local hl_rules = {}
+  --- 1-indexed line number → the FieldDescription rendered on it, so a cursor
+  --- row in the float resolves straight back to the column it shows.
+  --- @type table<integer, table>
+  local col_rows = {}
 
   local function add_hl(group, line_idx, col_s, col_e)
     table.insert(hl_rules, { group, line_idx, col_s, col_e })
@@ -528,6 +544,7 @@ render_describe = function(details, node)
 
     for _, col in ipairs(cols) do
       local row_idx = #lines
+      col_rows[row_idx + 1] = col
       local parts, pos = {}, 0
       local function seg(s, grp)
         if grp then add_hl(grp, row_idx, pos, pos + #s) end
@@ -597,7 +614,7 @@ render_describe = function(details, node)
   render_refs("Foreign keys",         flatten_refs(details.properties, "outgoing_references"), false)
   render_refs("Incoming references",  flatten_refs(details.properties, "incoming_references"), true)
 
-  return lines, hl_rules, win_title
+  return lines, hl_rules, win_title, col_rows
 end
 
 --- Compute float dimensions for `lines` (display-width aware).

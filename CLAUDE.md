@@ -54,6 +54,7 @@ grannos.nvim is a Neovim database-client plugin that delegates all database work
 | `lua/grannos/selection.lua` | Visual selection extraction |
 | `lua/grannos/ts_queries.lua` | Treesitter helpers: statement at cursor, statements in range |
 | `lua/grannos/symbols/` | Per-language extraction of the symbol under the cursor into an `explore.find` query |
+| `lua/grannos/completion/` | 'omnifunc' table/column completion for SQL buffers: `context.lua` classifies the cursor position, `cache.lua` holds `explore.list` results |
 | `lua/grannos/hl.lua` | Highlight group definitions |
 | `lua/grannos/table.lua` | Column-aligned table rendering for results |
 | `lua/grannos/messages.lua` | Pure renderer for an execute response's `messages` (DBMS_OUTPUT, compilation warnings) |
@@ -76,6 +77,16 @@ One extractor per treesitter language, in `lua/grannos/symbols/`, dispatched on 
 A language absent from that table simply never resolves, which is the same outcome as a cursor on a keyword. Adding one means adding a module with an `extract(node, bufnr)` function and registering it in `symbols/init.lua`; nothing else changes, because the backend already knows where every kind of node lives.
 
 Do not reintroduce client-side resolution against the explorer's cached tree. It was removed because it could only ever see what the user had already expanded in the sidebar, so the same hover resolved or didn't depending on unrelated browsing history.
+
+### Completion
+
+`lua/grannos/completion/` sets 'omnifunc' on connected SQL buffers. Two rules govern it:
+
+**It never sends `explore.describe`.** A describe costs ~11 round trips per table and reads user data (every driver samples column values; DuckDB does one `SELECT DISTINCT` *per column*). `explore.list [schema, table, "columns"]` returns the same names and types in one catalog query that touches no user table. Completion is only ever allowed the latter — the same reason it must not use `explore.find`, whose walker fans out across the tree.
+
+**It never blocks.** Omnifunc is synchronous and the backend is not, so a lookup returns what `completion/cache.lua` already holds and starts a fetch for the rest; when that lands the popup is refilled in place via `vim.fn.complete`. Resolution is chained (root listing → a schema's tables → a table's columns), so each refill arms the next round, bounded by `MAX_ROUNDS`.
+
+`completion/context.lua` does not parse the buffer as written — mid-keystroke there is usually no `column_ref` to read. It replaces the partial word with a placeholder identifier and parses that repaired copy, which recovers every clause a query buffer completes in. The one shape the grammar cannot recover is an INSERT column list (`INSERT INTO t (`), matched textually instead. The FROM/JOIN source analysis itself is shared with symbol extraction in `symbols/sql_sources.lua` so an alias resolves identically whether hovered or completed.
 
 ### Session state and connection identity
 

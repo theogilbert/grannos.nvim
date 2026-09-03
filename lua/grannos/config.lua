@@ -41,6 +41,20 @@ M.defaults = {
   -- and show all connections as "group/name" in a flat list.
   flat_conn_threshold = 5,
 
+  completion = {
+    -- Set 'omnifunc' on connected SQL buffers, so <C-x><C-o> completes table
+    -- and column names. Only `explore.list` is ever sent, and the server
+    -- caches each listing permanently, so a database sees one catalog query
+    -- per schema/table touched and nothing thereafter.
+    enabled = true,
+
+    -- Upper bound on schemas swept to offer *unqualified* table names. A
+    -- connection with more schemas than this offers schema names instead, so
+    -- one keystroke can never turn into a listing per schema; qualifying the
+    -- reference (`schema.`) always lists just that one.
+    max_schema_scan = 5,
+  },
+
   -- Results window options.
   results = {
     split     = "below",  -- "below" | "right"

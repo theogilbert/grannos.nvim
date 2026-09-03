@@ -95,10 +95,12 @@ local function set_buf_conn(bufnr, name, opts)
       { buffer = bufnr, desc = "Show query info" })
     vim.keymap.set("n", keys.goto_symbol_key, function() M.goto_symbol_at_cursor() end,
       { buffer = bufnr, desc = "Reveal symbol under cursor in the explorer" })
+    require("grannos.completion").attach(bufnr, name)
   else
     pcall(vim.keymap.del, "n", keys.hover_key, { buffer = bufnr })
     pcall(vim.keymap.del, "n", keys.query_info_key, { buffer = bufnr })
     pcall(vim.keymap.del, "n", keys.goto_symbol_key, { buffer = bufnr })
+    require("grannos.completion").detach(bufnr)
   end
 end
 
@@ -323,6 +325,7 @@ function M.disconnect(name)
       vim.notify("grannos: " .. err, vim.log.levels.ERROR)
       return
     end
+    require("grannos.completion").invalidate(conn.conn_id)
     state.conns[key] = nil
     -- Clear the label from every buffer that was using this connection.
     for bufnr, conn_name in pairs(state.buf_conns) do
@@ -582,6 +585,9 @@ end
 --- explorer tree they populated. Idempotent.
 local function clear_session_state()
   state.conns = {}
+  -- Connection ids die with the backend process, so nothing cached under them
+  -- can be reused by whatever the next process hands out.
+  require("grannos.completion").invalidate()
   for _, bufnr in ipairs(vim.tbl_keys(state.buf_conns)) do
     set_buf_conn(bufnr, nil)
   end
