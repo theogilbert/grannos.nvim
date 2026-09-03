@@ -35,6 +35,26 @@ local function row_count()
   return #f.fields + (f.on_test and 1 or 0)
 end
 
+--- Append `text` as a ✗-prefixed message and return the 0-indexed row range it
+--- occupies, for the caller to highlight.
+---
+--- A message shown here is whatever the driver produced — Oracle and Postgres
+--- both return multi-line errors, and a PL/SQL failure can run to a dozen lines
+--- — so it is split across buffer lines rather than interpolated into one.
+--- `nvim_buf_set_lines` rejects the entire call when any item contains a
+--- newline, which would take the whole form down with it.
+--- @param lines string[]  mutable line array being built
+--- @param text  string
+--- @return integer, integer  first row, last row (both 0-indexed, inclusive)
+local function append_message(lines, text)
+  local first = #lines
+  for i, part in ipairs(vim.split(tostring(text), "\n", { plain = true })) do
+    local body = (part:gsub("\r$", ""))
+    lines[#lines + 1] = (i == 1) and ("  \xE2\x9C\x97 " .. body) or ("    " .. body)
+  end
+  return first, #lines - 1
+end
+
 --- Redraw the form buffer from the current field values/cursor/error state.
 local function render()
   if not f.buf or not vim.api.nvim_buf_is_valid(f.buf) then return end
@@ -50,7 +70,7 @@ local function render()
     lines[i] = line
   end
 
-  local button_row0, test_err_row = nil, nil
+  local button_row0, test_err_row, test_err_last = nil, nil, nil
   if f.on_test then
     table.insert(lines, "")
     button_row0 = #lines
@@ -62,19 +82,24 @@ local function render()
     table.insert(lines, "  [ Test Connection ]" .. suffix)
     if f.test_status == "error" and f.test_error then
       table.insert(lines, "")
-      test_err_row = #lines
-      table.insert(lines, "  \xE2\x9C\x97 " .. f.test_error)
+      test_err_row, test_err_last = append_message(lines, f.test_error)
     end
   end
 
   table.insert(lines, "")
-  local err_row = nil
+  local err_row, err_last = nil, nil
   if f.error then
-    err_row = #lines
-    table.insert(lines, "  \xE2\x9C\x97 " .. f.error)  -- ✗
+    err_row, err_last = append_message(lines, f.error)
     table.insert(lines, "")
   end
   table.insert(lines, "  <Enter>/<Space> update   <C-s> save   q/<Esc> cancel   g? help")
+
+  -- Last line of defence: a field's display() carries whatever was typed or
+  -- pasted into it, and one newline anywhere would fail the whole set_lines
+  -- call rather than just its own line.
+  for i, line in ipairs(lines) do
+    if line:find("[\r\n]") then lines[i] = (line:gsub("[\r\n]+", " ")) end
+  end
 
   vim.bo[f.buf].modifiable = true
   vim.api.nvim_buf_set_lines(f.buf, 0, -1, false, lines)
@@ -98,10 +123,10 @@ local function render()
     end
   end
   if test_err_row then
-    vim.hl.range(f.buf, NS, "GrannosConnError", { test_err_row, 0 }, { test_err_row, -1 })
+    vim.hl.range(f.buf, NS, "GrannosConnError", { test_err_row, 0 }, { test_err_last, -1 })
   end
   if err_row then
-    vim.hl.range(f.buf, NS, "GrannosConnError", { err_row, 0 }, { err_row, -1 })
+    vim.hl.range(f.buf, NS, "GrannosConnError", { err_row, 0 }, { err_last, -1 })
   end
 
   local cursor_row0
