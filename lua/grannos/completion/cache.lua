@@ -103,6 +103,16 @@ function M.columns(conn_id, table_path, on_ready)
   return M.children(conn_id, path, on_ready)
 end
 
+--- Return true when any path is currently being fetched for `conn_id`.
+--- Lets a completion engine mark its response incomplete, so it asks again
+--- once the answer is in rather than settling for a partial list.
+--- @param conn_id any
+--- @return boolean
+function M.is_fetching(conn_id)
+  for _ in pairs(pending[conn_id] or {}) do return true end
+  return false
+end
+
 --- Drop everything cached for `conn_id`, or for every connection when nil.
 --- Called when a connection closes and when the user asks for a refresh, so a
 --- re-listed tree is picked up rather than served from a stale copy.

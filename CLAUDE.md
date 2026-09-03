@@ -54,7 +54,7 @@ grannos.nvim is a Neovim database-client plugin that delegates all database work
 | `lua/grannos/selection.lua` | Visual selection extraction |
 | `lua/grannos/ts_queries.lua` | Treesitter helpers: statement at cursor, statements in range |
 | `lua/grannos/symbols/` | Per-language extraction of the symbol under the cursor into an `explore.find` query |
-| `lua/grannos/completion/` | 'omnifunc' table/column completion for SQL buffers: `context.lua` classifies the cursor position, `cache.lua` holds `explore.list` results |
+| `lua/grannos/completion/` | Table/column completion for SQL buffers: `context.lua` classifies the cursor position, `cache.lua` holds `explore.list` results, `init.lua` serves 'omnifunc', `cmp.lua` is the nvim-cmp source |
 | `lua/grannos/hl.lua` | Highlight group definitions |
 | `lua/grannos/table.lua` | Column-aligned table rendering for results |
 | `lua/grannos/messages.lua` | Pure renderer for an execute response's `messages` (DBMS_OUTPUT, compilation warnings) |

@@ -434,6 +434,36 @@ What is offered depends on where the cursor sits:
 
 Candidates are filtered by what has been typed, case-insensitively.
 
+AS YOU TYPE (nvim-cmp) ~                              *grannos-completion-cmp*
+
+'omnifunc' is manual. For a menu that opens while you type, grannos ships a
+native nvim-cmp source named `grannos`: >lua
+  require("cmp").setup({
+    sources = { { name = "grannos" }, { name = "buffer" } },
+  })
+<
+Or, to keep it to SQL buffers alone: >lua
+  require("cmp").setup.filetype("sql", {
+    sources = { { name = "grannos" }, { name = "buffer" } },
+  })
+<
+The source registers itself from `require("grannos").setup()`. If cmp is
+lazy-loaded it is not there yet at that point, so call this from cmp's own
+config instead: >lua
+  require("grannos.completion.cmp").setup()
+<
+The source is only active in a buffer that has a connection, and it triggers
+on "." as well as on word characters — after `alias.` there is no word for cmp
+to fire on, and that is where the column list matters most. Filtering is left
+to cmp, so its own sorting and fuzzy matching apply.
+
+Prefer a native source over `cmp-omni`: 'omnifunc' refreshes its own popup when
+a listing arrives, which cmp neither sees nor honours, so a cold lookup through
+`cmp-omni` shows an empty menu until the next keystroke. This source uses cmp's
+`isIncomplete` instead and asks it to re-query when the answer lands.
+
+Any other engine can drive 'omnifunc' directly; see |compl-omni|.
+
 IMPACT ON THE DATABASE ~
 
 Completion only ever sends `explore.list`, never `explore.describe`: it reads

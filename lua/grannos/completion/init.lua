@@ -187,6 +187,35 @@ local function candidates(conn_id, ctx, base, on_ready)
   return out
 end
 
+--- Return the connection id backing `bufnr`, or nil when it has none.
+--- Public so a completion engine's source can gate itself on it.
+--- @param bufnr integer
+--- @return any|nil
+function M.conn_id(bufnr)
+  return conn_id_for(bufnr)
+end
+
+--- Return the candidates for a cursor position, engine-agnostically.
+---
+--- The same list `omnifunc` serves, exposed so an engine that does its own
+--- filtering and rendering can ask for a position directly. Pass an empty
+--- `base` to get everything the position offers and filter it yourself.
+--- @param bufnr    integer
+--- @param row      integer       0-indexed
+--- @param col      integer       0-indexed byte column of the cursor
+--- @param base     string|nil    typed prefix to filter by; "" or nil for all
+--- @param on_ready fun()|nil     called when a listing this position needed arrives
+--- @return table[]  { word, kind, menu } entries
+function M.candidates_at(bufnr, row, col, base, on_ready)
+  local conn_id = conn_id_for(bufnr)
+  if not conn_id then return {} end
+  local line      = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1] or ""
+  local start_col = word_start(line, col)
+  local ctx       = context.at_cursor(bufnr, row, start_col, col)
+  if not ctx then return {} end
+  return candidates(conn_id, ctx, base or "", on_ready)
+end
+
 --- Resolving a position can take several rounds: knowing the tree's shape is
 --- what tells us to list a schema's tables, and finding the table there is what
 --- tells us to list its columns. Each round therefore arms a fresh callback for
@@ -294,6 +323,11 @@ end
 --- on`, which is not something to leave to chance. Scheduling puts the claim
 --- after every handler in the cycle, whatever the order.
 function M.setup()
+  -- Registers the nvim-cmp source when cmp is already loaded. A lazy-loaded
+  -- cmp is not here yet, which is why its own config can call
+  -- `require("grannos.completion.cmp").setup()` instead.
+  pcall(function() require("grannos.completion.cmp").setup() end)
+
   vim.api.nvim_create_autocmd("FileType", {
     group    = vim.api.nvim_create_augroup("GrannosCompletion", { clear = true }),
     callback = function(args)

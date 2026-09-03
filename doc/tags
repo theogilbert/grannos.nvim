@@ -16,6 +16,7 @@
 grannos-api	grannos.txt	/*grannos-api*
 grannos-commands	grannos.txt	/*grannos-commands*
 grannos-completion	grannos.txt	/*grannos-completion*
+grannos-completion-cmp	grannos.txt	/*grannos-completion-cmp*
 grannos-completion-enabled	grannos.txt	/*grannos-completion-enabled*
 grannos-completion-max_schema_scan	grannos.txt	/*grannos-completion-max_schema_scan*
 grannos-config	grannos.txt	/*grannos-config*
