@@ -199,17 +199,40 @@ describe("completion.omnifunc", function()
     assert.same({ "", "public\0users\0columns" }, requests)
   end)
 
+  local OMNIFUNC = "v:lua.require'grannos.completion'.omnifunc"
+
   it("claims omnifunc back when the filetype is set after the connection", function()
     -- A scratch query buffer: associated first, `:set ft=sql` afterwards.
-    -- Vim's own ftplugin points omnifunc at sqlcomplete#Complete on FileType,
-    -- so losing this race means <C-x><C-o> silently offers SQL keywords.
-    require("grannos.completion").setup()
+    completion.setup()
     local buf = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_set_current_buf(buf)
     completion.attach(buf, "conn")
     assert.equals("", vim.bo[buf].omnifunc)
     vim.bo[buf].filetype = "sql"
-    assert.equals("v:lua.require'grannos.completion'.omnifunc", vim.bo[buf].omnifunc)
+    vim.wait(200, function() return vim.bo[buf].omnifunc == OMNIFUNC end)
+    assert.equals(OMNIFUNC, vim.bo[buf].omnifunc)
+  end)
+
+  it("wins the omnifunc slot even against a later-registered ftplugin", function()
+    -- Vim's ftplugin/sql.vim sets omnifunc to sqlcomplete#Complete from a
+    -- FileType handler. If it is registered after ours — which depends on
+    -- where the user calls setup() — an inline claim loses, and <C-x><C-o>
+    -- answers "The dbext plugin must be loaded for dynamic SQL completion".
+    completion.setup()
+    local later = vim.api.nvim_create_augroup("GrannosSpecFtplugin", { clear = true })
+    vim.api.nvim_create_autocmd("FileType", {
+      group   = later, pattern = "sql",
+      callback = function(a) vim.bo[a.buf].omnifunc = "sqlcomplete#Complete" end,
+    })
+
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_set_current_buf(buf)
+    completion.attach(buf, "conn")
+    vim.bo[buf].filetype = "sql"
+    vim.wait(200, function() return vim.bo[buf].omnifunc == OMNIFUNC end)
+    assert.equals(OMNIFUNC, vim.bo[buf].omnifunc)
+
+    vim.api.nvim_del_augroup_by_id(later)
   end)
 
   it("never sends explore.describe — it reads user data", function()

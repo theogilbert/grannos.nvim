@@ -286,13 +286,23 @@ end
 
 --- Register the FileType handler that re-claims 'omnifunc' on connected
 --- buffers. Called once from `grannos.setup()`.
+---
+--- The claim is deferred rather than made inline. FileType handlers run in
+--- registration order, and Vim's own ftplugin/sql.vim sets 'omnifunc' to
+--- `sqlcomplete#Complete` from one of them — so whether we win depends on
+--- whether the user's `setup()` call happened before or after `filetype plugin
+--- on`, which is not something to leave to chance. Scheduling puts the claim
+--- after every handler in the cycle, whatever the order.
 function M.setup()
   vim.api.nvim_create_autocmd("FileType", {
     group    = vim.api.nvim_create_augroup("GrannosCompletion", { clear = true }),
     callback = function(args)
-      if attached[args.buf] and vim.bo[args.buf].omnifunc ~= OMNIFUNC then
-        enable(args.buf)
-      end
+      if not attached[args.buf] then return end
+      vim.schedule(function()
+        if attached[args.buf] and vim.bo[args.buf].omnifunc ~= OMNIFUNC then
+          enable(args.buf)
+        end
+      end)
     end,
   })
 end
