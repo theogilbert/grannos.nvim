@@ -26,6 +26,12 @@
 ; CTE name
 (cte name: (identifier) @function)
 
+; Recursive-CTE cycle detection: the marked columns and the pseudo-columns the
+; clause introduces (CYCLE id SET is_cycle TO 'Y' DEFAULT 'N' USING path).
+(cycle_clause column: (identifier) @variable.member)
+(cycle_clause mark: (identifier) @variable.member)
+(cycle_clause path: (identifier) @variable.member)
+
 ; ─── Functions ───────────────────────────────────────────────────────────────
 
 (function_call function: (function_name) @function.call)
@@ -122,6 +128,7 @@
 "PERCENT"   @keyword
 "WITH"      @keyword
 "RECURSIVE" @keyword
+"CYCLE"     @keyword
 "AS"        @keyword
 "DISTINCT"  @keyword
 "ALL"       @keyword
@@ -160,6 +167,7 @@
 "ALTER"          @keyword
 "DROP"           @keyword
 "TRUNCATE"       @keyword
+"COMMENT"        @keyword
 "COLUMN"         @keyword
 "CONSTRAINT"     @keyword
 "PRIMARY"        @keyword
@@ -201,6 +209,11 @@
 "DATABASE"       @keyword
 "SCHEMA"         @keyword
 "SEQUENCE"       @keyword
+
+; ─── COMMENT ON ──────────────────────────────────────────────────────────────
+
+; The commented object; for COLUMN this is the dotted `schema.table.column`.
+(comment_statement name: (table_ref) @variable)
 
 ; ─── Join keywords ───────────────────────────────────────────────────────────
 
@@ -283,6 +296,26 @@
 "PSTDOUT"  @keyword
 (copy_option name: (identifier) @attribute)
 
+; ─── SQLcl LOAD ──────────────────────────────────────────────────────────────
+
+"LOAD"            @keyword
+"DELIMITER"       @keyword
+"QUOTE"           @keyword
+"SKIP"            @keyword
+"BATCH"           @keyword
+"ENCODING"        @keyword
+"DATEFORMAT"      @keyword
+"TIMESTAMPFORMAT" @keyword
+"HEADER"          @keyword
+; `NULL` names an option here, not the literal.
+(load_option "NULL" @keyword)
+
+(load_statement table: (table_ref) @variable)
+; Explicit target column list: LOAD t (a, b) 'file.csv'
+(load_statement (identifier) @variable.member)
+; Enum-like option value: (FORMAT csv)
+(load_option value: (identifier) @constant)
+
 ; ─── Ordered-set aggregates ──────────────────────────────────────────────────
 
 "WITHIN" @keyword
@@ -307,6 +340,128 @@
 
 ; IS expression constants (outside of literal context)
 "UNKNOWN" @constant.builtin
+
+; ─── PL/SQL (Oracle) ─────────────────────────────────────────────────────────
+
+; Declared names
+(create_procedure_statement name: (table_ref) @function)
+(create_package_statement name: (table_ref) @module)
+(subprogram_declaration name: (identifier) @function)
+(procedure_call_statement procedure: (function_name) @function.call)
+(cursor_declaration name: (identifier) @variable)
+(variable_declaration name: (identifier) @variable)
+(exception_declaration name: (identifier) @variable)
+(type_declaration name: (identifier) @type)
+(record_field name: (identifier) @variable.member)
+(parameter_declaration name: (identifier) @variable.parameter)
+(named_argument name: (identifier) @variable.parameter)
+(pragma_declaration name: (identifier) @attribute)
+
+; Anchored types: t.col%TYPE, t%ROWTYPE
+(anchored_type) @type
+
+; Cursor attributes: c%NOTFOUND, SQL%ROWCOUNT
+(cursor_attribute attribute: _ @attribute)
+
+; Labels: <<name>>, EXIT name, GOTO name, END LOOP name
+(statement_label name: (identifier) @label)
+(loop_statement label: (identifier) @label)
+(exit_statement label: (identifier) @label)
+(continue_statement label: (identifier) @label)
+(goto_statement label: (identifier) @label)
+
+; Block / program-unit keywords
+"DECLARE"   @keyword
+"PROCEDURE" @keyword.function
+"FUNCTION"  @keyword.function
+"PACKAGE"   @keyword
+"BODY"      @keyword
+"CURSOR"    @keyword
+"CONSTANT"  @keyword
+"PRAGMA"    @keyword
+"RECORD"    @keyword
+"VARRAY"    @keyword
+"VARYING"   @keyword
+"REF"       @keyword
+"OF"        @keyword
+"ROWTYPE"   @keyword
+"NOCOPY"    @keyword
+"OUT"       @keyword
+"INOUT"     @keyword
+
+; Control flow
+"LOOP"      @keyword.repeat
+"WHILE"     @keyword.repeat
+"FORALL"    @keyword.repeat
+"REVERSE"   @keyword.repeat
+"EXIT"      @keyword.repeat
+"ELSIF"     @keyword.conditional
+"ELSEIF"    @keyword.conditional
+"GOTO"      @keyword
+"RETURN"    @keyword.return
+
+; Exceptions
+"EXCEPTION"  @keyword.exception
+"EXCEPTIONS" @keyword.exception
+"RAISE"      @keyword.exception
+
+; Cursor / dynamic SQL statements
+"OPEN"      @keyword
+"CLOSE"     @keyword
+"BULK"      @keyword
+"COLLECT"   @keyword
+"SAVE"      @keyword
+
+; ─── Object types ────────────────────────────────────────────────────────────
+
+(create_type_statement name: (table_ref) @type)
+(create_type_statement supertype: (table_ref) @type)
+(object_attribute name: (identifier) @variable.member)
+(method_specification name: (identifier) @function)
+
+"OBJECT"       @keyword
+"UNDER"        @keyword
+"FORCE"        @keyword
+"FINAL"        @keyword
+"INSTANTIABLE" @keyword
+"OVERRIDING"   @keyword
+"MEMBER"       @keyword
+"STATIC"       @keyword
+"MAP"          @keyword
+"CONSTRUCTOR"  @keyword
+"SELF"         @variable.builtin
+"RESULT"       @keyword
+
+; ─── Triggers ────────────────────────────────────────────────────────────────
+
+(create_trigger_statement name: (table_ref) @function)
+(create_trigger_statement table: (table_ref) @variable)
+
+"TRIGGER"        @keyword
+"BEFORE"         @keyword
+"AFTER"          @keyword
+"INSTEAD"        @keyword
+"EACH"           @keyword
+"STATEMENT"      @keyword
+"REFERENCING"    @keyword
+"OLD"            @keyword
+"NEW"            @keyword
+"PARENT"         @keyword
+"FOLLOWS"        @keyword
+"PRECEDES"       @keyword
+"ENABLE"         @keyword
+"DISABLE"        @keyword
+"EDITIONABLE"    @keyword
+"NONEDITIONABLE" @keyword
+
+; NULL as a statement and in NOT NULL constraints
+"NULL" @constant.builtin
+
+; PL/SQL operators
+":=" @operator
+"=>" @operator
+".." @operator
+"%"  @operator
 
 ; ─── Punctuation ─────────────────────────────────────────────────────────────
 
