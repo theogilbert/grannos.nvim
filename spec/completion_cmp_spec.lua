@@ -88,6 +88,9 @@ describe("completion.cmp", function()
     table.sort(labels)
     assert.same({ "email", "id" }, labels)
     assert.equals(5, res.items[1].kind)             -- Field
+    -- labelDetails is what cmp renders in the menu column; detail only ever
+    -- reaches the documentation window.
+    assert.is_truthy(res.items[1].labelDetails.description:find("·", 1, true))
     assert.is_truthy(res.items[1].detail:find("·", 1, true))
   end)
 

@@ -13,6 +13,8 @@ local WRITE_NODE_TYPES = {
   create_clause        = true, merge_clause           = true,
   delete_clause        = true, detach_delete_clause   = true,
   set_clause           = true, remove_clause          = true,
+  -- SQLcl LOAD (Oracle): client-side bulk load, sent as batched INSERTs.
+  load_statement       = true,
 }
 
 --- Recursively check whether `node` or any descendant is a write operation.

@@ -25,14 +25,19 @@ local KINDS = {
 }
 
 --- Convert one omnifunc-shaped candidate into a cmp item.
+---
+--- The type/owner annotation goes in `labelDetails.description`, which is what
+--- cmp renders in the menu column; `detail` alone would only ever reach the
+--- documentation window.
 --- @param item table  { word, kind, menu }
 --- @return table
 local function cmp_item(item)
   local lsp = require("cmp.types").lsp
   return {
-    label  = item.word,
-    kind   = lsp.CompletionItemKind[KINDS[item.kind] or "Text"],
-    detail = item.menu,
+    label        = item.word,
+    kind         = lsp.CompletionItemKind[KINDS[item.kind] or "Text"],
+    labelDetails = { description = item.menu },
+    detail       = item.menu,
   }
 end
 
