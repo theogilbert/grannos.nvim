@@ -31,6 +31,26 @@ local NS         = vim.api.nvim_create_namespace("GrannosDetailPane")
 --- @return boolean
 function M.is_nil(v) return v == nil or v == vim.NIL end
 
+--- Remember the window and cursor position a float is about to take focus from,
+--- so closing it can put the user back exactly where they were. Floats open
+--- asynchronously here (a describe lands whenever the backend answers), and the
+--- window Neovim falls back to on close is whatever happened to be current when
+--- the float opened — not necessarily where the user asked the question from.
+---
+--- Call before opening any window; call the returned function on an *explicit*
+--- close only. Restoring after a close the user caused by moving elsewhere (the
+--- leave-to-close check) would drag them back out of the window they just chose.
+--- @return fun()  restores focus and cursor, skipping whatever is no longer valid
+function M.capture_origin()
+  local win = vim.api.nvim_get_current_win()
+  local ok, cursor = pcall(vim.api.nvim_win_get_cursor, win)
+  return function()
+    if not vim.api.nvim_win_is_valid(win) then return end
+    pcall(vim.api.nvim_set_current_win, win)
+    if ok then pcall(vim.api.nvim_win_set_cursor, win, cursor) end
+  end
+end
+
 --- Re-describe `path`, discarding both this call's result and any cached
 --- explore data the server holds for it (`reset_cache = true`), so describe
 --- floats can offer an "r" refresh that reflects the database's current state
@@ -194,8 +214,13 @@ end
 ---   .on_submit   fn(item|nil)|nil          called when <CR> is pressed in the search box
 ---   .extra_help  { lhs: string, desc: string, group: string }[]|nil   additional entries
 ---                shown by <C-h>'s help float, for keymaps a caller adds on its own windows
---- @return table  { input_win, list_win, close = fun(), register_win = fun(winid), show_help = fun() }
+---   .restore_origin fun()|nil               where to return the cursor on an explicit close
+---                (see M.capture_origin); defaults to capturing the current window here,
+---                which is only right when no other window of the float is open yet
+--- @return table  { input_win, list_win, close = fun(restore: boolean|nil), register_win = fun(winid), show_help = fun() }
 function M.open_search_list(opts)
+  local restore_origin = opts.restore_origin or M.capture_origin()
+
   local items       = opts.items
   local matches     = opts.matches or function(item, text)
     local ok, m = pcall(vim.fn.match, opts.get_label(item), "\\c" .. text)
@@ -244,13 +269,18 @@ function M.open_search_list(opts)
   local aug = vim.api.nvim_create_augroup("GrannosSearchList_" .. list_buf, { clear = true })
 
   --- Close every window registered with this pane.
-  local function close()
+  --- @param restore boolean|nil  true when the user closed the float outright
+  ---                (a key, or a submit), so focus belongs back where it came
+  ---                from; nil when the float is closing *because* focus went
+  ---                somewhere else, which must not be undone.
+  local function close(restore)
     if closed then return end
     closed = true
     vim.schedule(function() pcall(vim.api.nvim_del_augroup_by_id, aug) end)
     for _, w in ipairs(all_wins) do
       if vim.api.nvim_win_is_valid(w) then pcall(vim.api.nvim_win_close, w, true) end
     end
+    if restore then restore_origin() end
   end
 
   --- Register another float window (e.g. a detail pane) as part of this group:
@@ -464,7 +494,7 @@ function M.open_search_list(opts)
       vim.api.nvim_win_set_cursor(input_win, { 1, SEARCH_PROMPT_LEN })
       update_list("")
     else
-      close()
+      close(true)
     end
   end
   vim.keymap.set("i", "<Esc>", esc_action, { buffer = input_buf, silent = true })
@@ -474,14 +504,15 @@ function M.open_search_list(opts)
   -- which clears the filter first).
   local function cancel_action()
     vim.cmd("stopinsert")
-    close()
+    close(true)
   end
   vim.keymap.set({ "i", "n" }, "<C-c>", cancel_action, { buffer = input_buf, nowait = true, silent = true })
 
   -- Fallback close if the user somehow focuses the list (e.g. mouse click).
-  vim.keymap.set("n", "q",     close, { buffer = list_buf, nowait = true, silent = true })
-  vim.keymap.set("n", "<Esc>", close, { buffer = list_buf, nowait = true, silent = true })
-  vim.keymap.set("n", "<C-c>", close, { buffer = list_buf, nowait = true, silent = true })
+  local function close_from_list() close(true) end
+  vim.keymap.set("n", "q",     close_from_list, { buffer = list_buf, nowait = true, silent = true })
+  vim.keymap.set("n", "<Esc>", close_from_list, { buffer = list_buf, nowait = true, silent = true })
+  vim.keymap.set("n", "<C-c>", close_from_list, { buffer = list_buf, nowait = true, silent = true })
 
   -- <C-h>: show a help float listing every keymap active in this browsing float.
   local help_keymaps = {
@@ -546,6 +577,8 @@ end
 ---                                        defaults to replacing every field of `item` with
 ---                                        `details`' own fields
 function M.open_searchable_two_pane(opts)
+  local restore_origin = M.capture_origin()
+
   local items = opts.items
   if #items == 0 then
     vim.notify("grannos: nothing to display", vim.log.levels.WARN)
@@ -614,7 +647,7 @@ function M.open_searchable_two_pane(opts)
   --- Close the float, then hand the selected item to the caller's on_submit.
   --- @param item any|nil
   local function submit(item)
-    handle.close()
+    handle.close(true)
     opts.on_submit(item)
   end
 
@@ -627,6 +660,7 @@ function M.open_searchable_two_pane(opts)
     on_change   = sync,
     on_submit   = opts.on_submit and submit or nil,
     extra_help  = extra_help,
+    restore_origin = restore_origin,
   })
   handle.register_win(rwin)
 
@@ -691,9 +725,10 @@ function M.open_searchable_two_pane(opts)
   --- @param key string
   --- @param fn  fun()
   local function rmap(key, fn) vim.keymap.set("n", key, fn, { buffer = rbuf, nowait = true, silent = true }) end
-  rmap("q",     handle.close)
-  rmap("<Esc>", handle.close)
-  rmap("<C-c>", handle.close)
+  local function close_from_right() handle.close(true) end
+  rmap("q",     close_from_right)
+  rmap("<Esc>", close_from_right)
+  rmap("<C-c>", close_from_right)
   rmap("<Tab>", focus_input)
   rmap("<C-h>", handle.show_help)
   if opts.on_submit then
@@ -717,6 +752,8 @@ end
 ---   .conn_id  any|nil          connection to refetch from; with `.path`, enables "r" to refresh
 ---   .path     string[]|nil     leaf path to re-describe on "r" (discarding server-side cache)
 function M.open_single(opts)
+  local restore_origin = M.capture_origin()
+
   local ew     = vim.o.columns
   local eh     = vim.o.lines
   local width  = math.min(math.floor(ew * 0.60), 110)
@@ -743,8 +780,11 @@ function M.open_single(opts)
   vim.api.nvim_win_set_hl_ns(win, hl.NS_ID)
   vim.api.nvim_set_option_value("wrap", false, { win = win })
 
-  --- Close the single-item float.
-  local function close() pcall(vim.api.nvim_win_close, win, true) end
+  --- Close the single-item float and return the user where they came from.
+  local function close()
+    pcall(vim.api.nvim_win_close, win, true)
+    restore_origin()
+  end
 
   local aug = vim.api.nvim_create_augroup("GrannosDetailPane_" .. buf, { clear = true })
   vim.api.nvim_create_autocmd("WinClosed", {

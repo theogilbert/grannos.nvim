@@ -14,6 +14,7 @@ local ts_queries        = require("grannos.ts_queries")
 local symbols           = require("grannos.symbols")
 local log               = require("grannos.log")
 local hover             = require("grannos.ui.hover")
+local symbol_busy       = require("grannos.ui.symbol_busy")
 
 local FLASH_NS = vim.api.nvim_create_namespace("GrannosFlash")
 
@@ -589,6 +590,7 @@ local function clear_session_state()
   -- Connection ids die with the backend process, so nothing cached under them
   -- can be reused by whatever the next process hands out.
   require("grannos.completion").invalidate()
+  symbol_busy.reset()
   for _, bufnr in ipairs(vim.tbl_keys(state.buf_conns)) do
     set_buf_conn(bufnr, nil)
   end
@@ -693,11 +695,15 @@ local render_query_info  -- forward declaration; defined below show_query_info
 --- for hovering diagram regions.
 --- @param conn_key string
 --- @param path     string[]
-local function describe_symbol(conn_key, path)
+--- @param anchor   { bufnr: integer, row: integer }|nil  where to show the
+---                 in-flight indicator; omitted, the describe runs unannounced
+local function describe_symbol(conn_key, path, anchor)
   local conn = state.conns[conn_key]
   if not conn then return end
+  local busy = anchor and symbol_busy.start(anchor.bufnr, anchor.row, "describing " .. path[#path])
   client.request("explore.describe", { connection_id = conn.conn_id, path = path }, function(err, result)
     vim.schedule(function()
+      symbol_busy.stop(busy)
       if err then
         vim.notify("grannos: " .. err, vim.log.levels.ERROR)
         return
@@ -756,9 +762,13 @@ end
 --- @param on_path  fun(path: string[])
 --- @param pick     fun(conn_key: string, paths: string[][], name: string, on_choice: fun(path: string[]))|nil
 ---                 how to disambiguate; defaults to the previewing two-pane picker
-local function resolve_symbol(conn_key, query, on_path, pick)
+--- @param anchor   { bufnr: integer, row: integer }|nil  where to show the
+---                 in-flight indicator, which is dropped before `on_path` runs
+---                 so the next phase can raise its own
+local function resolve_symbol(conn_key, query, on_path, pick, anchor)
   local conn = state.conns[conn_key]
   if not conn then return end
+  local busy = anchor and symbol_busy.start(anchor.bufnr, anchor.row, "finding " .. query.name)
   local params = {
     connection_id = conn.conn_id,
     type          = query.type,
@@ -767,6 +777,7 @@ local function resolve_symbol(conn_key, query, on_path, pick)
   }
   client.request("explore.find", params, function(err, result)
     vim.schedule(function()
+      symbol_busy.stop(busy)
       if err then
         vim.notify("grannos: " .. err, vim.log.levels.ERROR)
         return
@@ -800,9 +811,10 @@ function M.describe_symbol_at_cursor()
     vim.notify("grannos: no symbol under the cursor", vim.log.levels.INFO)
     return
   end
+  local anchor = { bufnr = bufnr, row = vim.api.nvim_win_get_cursor(0)[1] - 1 }
   resolve_symbol(conn_key, symbol, function(path)
-    describe_symbol(conn_key, path)
-  end)
+    describe_symbol(conn_key, path, anchor)
+  end, nil, anchor)
 end
 
 --- Reveal the symbol under the cursor in the schema explorer: opens (or
@@ -822,7 +834,7 @@ function M.goto_symbol_at_cursor()
   resolve_symbol(conn_key, symbol, function(path)
     M.open_explorer_for(conn_key)
     explorer.reveal(path)
-  end, pick_candidate_select)
+  end, pick_candidate_select, { bufnr = bufnr, row = vim.api.nvim_win_get_cursor(0)[1] - 1 })
 end
 
 --- Open a hover float showing execution info for the query at the cursor.

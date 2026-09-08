@@ -632,6 +632,7 @@ end
 --- @param win_title string
 --- @return { buf: integer, win: integer, ns: integer, title: string }
 present_describe_float = function(lines, hl_rules, win_title)
+  local restore_origin = pane.capture_origin()
   local width, height = calculate_win_size(lines)
 
   local buf = vim.api.nvim_create_buf(false, true)
@@ -658,9 +659,13 @@ present_describe_float = function(lines, hl_rules, win_title)
   vim.api.nvim_win_set_hl_ns(win, hl.NS_ID)
   vim.api.nvim_set_option_value("cursorline", true, { win = win })
 
+  --- Close the float and put the user back where they opened it from.
+  local function close()
+    pcall(vim.api.nvim_win_close, win, true)
+    restore_origin()
+  end
   for _, key in ipairs({ "q", "<Esc>" }) do
-    vim.keymap.set("n", key, function() pcall(vim.api.nvim_win_close, win, true) end,
-      { buffer = buf, silent = true, nowait = true })
+    vim.keymap.set("n", key, close, { buffer = buf, silent = true, nowait = true })
   end
 
   return { buf = buf, win = win, ns = ns, title = win_title }
