@@ -130,13 +130,17 @@ local function center(text, width)
 end
 
 --- Expand `widths[i]` to fit the display width of each cell in `cols` (with 1-space padding each side).
+--- Runs over `ncols` rather than the row's own length, so a row that is missing
+--- trailing cells still reserves a width for them.
 --- @param cols        table    array of cell values
 --- @param widths      integer[]  mutable column-width array
+--- @param ncols       integer  number of columns the table renders
 --- @param sep         string[]|nil per-column thousands-separator, indexed like `cols`, or nil to disable
 --- @param decimal_sep string|nil decimal-point separator, or nil for "."
-local function update_col_widths(cols, widths, sep, decimal_sep)
-  for i, cell in ipairs(cols) do
-    widths[i] = math.max(widths[i] or 2, vim.api.nvim_strwidth(cell_display(cell, sep and sep[i], decimal_sep)) + 2)
+local function update_col_widths(cols, widths, ncols, sep, decimal_sep)
+  for i = 1, ncols do
+    widths[i] = math.max(widths[i] or 2,
+      vim.api.nvim_strwidth(cell_display(cols[i], sep and sep[i], decimal_sep)) + 2)
   end
 end
 
@@ -181,19 +185,25 @@ end
 function M.from_structured_data(lines, header_lines, sep, decimal_sep)
   header_lines = header_lines or 1
   decimal_sep = (decimal_sep and decimal_sep ~= "") and decimal_sep or nil
-  local ncols = lines[1] and #lines[1] or 0
+  -- Every row renders the same number of columns as the widest one: a row that
+  -- is short a trailing cell (a driver that omits trailing NULLs, a row built
+  -- with table.insert over a nil value) would otherwise render a shorter line
+  -- than the header, and a row with an extra cell a longer one — either way the
+  -- data stops lining up with the header above it. Missing cells render empty.
+  local ncols = 0
+  for _, row in ipairs(lines) do ncols = math.max(ncols, #row) end
   sep = normalize_sep(sep, ncols)
   local widths = {}
   for i, row in ipairs(lines) do
-    update_col_widths(row, widths, sep, decimal_sep)
+    update_col_widths(row, widths, ncols, sep, decimal_sep)
     maybe_yield(i)
   end
 
   local formatted = {}
   for i, row in ipairs(lines) do
     local cells = {}
-    for j, cell in ipairs(row) do
-      cells[j] = center(cell_display(cell, sep and sep[j], decimal_sep), widths[j])
+    for j = 1, ncols do
+      cells[j] = center(cell_display(row[j], sep and sep[j], decimal_sep), widths[j])
     end
     table.insert(formatted, M.COL_SEPARATOR .. table.concat(cells, M.COL_SEPARATOR) .. M.COL_SEPARATOR)
     maybe_yield(i)

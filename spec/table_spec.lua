@@ -130,6 +130,41 @@ describe("table.from_structured_data multi-line cells", function()
   end)
 end)
 
+describe("table.from_structured_data ragged rows", function()
+  it("pads a row that is missing trailing cells so it still matches the header", function()
+    -- A row array whose trailing value is nil: what a driver that omits trailing
+    -- NULLs, or a row built with table.insert over a nil, hands the renderer.
+    local rows = {
+      { "id", "note" },
+      { 1 },
+      { 2, "plain" },
+    }
+    local tbl = table_fmt.from_structured_data(rows, 1, nil, ".")
+
+    local width = vim.api.nvim_strwidth(tbl.text[1])
+    for _, line in ipairs(tbl.text) do
+      assert.equals(width, vim.api.nvim_strwidth(line))
+    end
+    assert.equals(2, #tbl.columns_width)
+  end)
+
+  it("widens the header to the widest row when a row carries an extra cell", function()
+    local rows = {
+      { "id", "note" },
+      { 1, "x", "extra" },
+      { 2, "plain" },
+    }
+    local tbl = table_fmt.from_structured_data(rows, 1, nil, ".")
+
+    local width = vim.api.nvim_strwidth(tbl.text[1])
+    for _, line in ipairs(tbl.text) do
+      assert.equals(width, vim.api.nvim_strwidth(line))
+    end
+    assert.equals(3, #tbl.columns_width)
+    assert.is_not_nil(tbl.text[3]:find("extra", 1, true))
+  end)
+end)
+
 describe("table.get_column_at_cursor", function()
   it("resolves the column at a given virtual cursor position, and nil on separators", function()
     local widths = { 5, 4 }  -- │<5 cols>│<4 cols>│
