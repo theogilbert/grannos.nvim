@@ -77,6 +77,28 @@ local function format_number(n, sep, decimal_sep)
   return int_str .. frac, #int_str
 end
 
+--- Printable stand-ins for the control characters that turn up in real cell
+--- values (a traceback, a JSON blob, an indented text column).
+local CONTROL_ESCAPES = { ["\n"] = "\\n", ["\r"] = "\\r", ["\t"] = "\\t" }
+
+--- Replace control characters in `s` with their source-literal escapes, so a
+--- multi-line value renders as one line of one row.
+---
+--- A cell is one line of a box-drawn row: an embedded newline either splits the
+--- row or (as in the results pane, which strips them before writing the buffer)
+--- disappears, and either way the row stops lining up with the header, because
+--- the width the layout reserved counted a character that is no longer there.
+--- Escaping happens here, ahead of both the width measurement and the render,
+--- so the two always agree on what a cell looks like.
+--- @param s string
+--- @return string
+local function escape_control(s)
+  if not s:find("%c") then return s end
+  return (s:gsub("%c", function(c)
+    return CONTROL_ESCAPES[c] or ("\\x%02X"):format(c:byte())
+  end))
+end
+
 --- Return the display string for a cell value, mapping vim.NIL → "NULL", a
 --- LobPlaceholder/SpecialFloat object → its server-formatted `text`, and formatting
 --- numeric cells with the configured thousands/decimal separators.
@@ -87,15 +109,15 @@ end
 local function cell_display(cell, sep, decimal_sep)
   if cell == vim.NIL then return NULL_TEXT end
   if cell == nil     then return "" end
-  if is_lob(cell)    then return cell.text end
-  if is_special_float(cell) then return cell.text end
+  if is_lob(cell)    then return escape_control(cell.text) end
+  if is_special_float(cell) then return escape_control(cell.text) end
   sep         = (sep and sep ~= "") and sep or nil
   decimal_sep = (decimal_sep and decimal_sep ~= "") and decimal_sep or nil
   if type(cell) == "number" and (sep or decimal_sep) then
     local s = format_number(cell, sep, decimal_sep)
     return s
   end
-  return tostring(cell)
+  return escape_control(tostring(cell))
 end
 
 --- Center `text` within `width` display columns using space padding.

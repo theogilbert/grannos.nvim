@@ -36,7 +36,7 @@ describe("ui.symbol_busy", function()
     local m = marks(buf)
     assert.equals(1, #m)
     assert.equals(1, m[1].row)
-    assert.equals("GrannosExplorerDim", m[1].hl)
+    assert.equals("GrannosSymbolBusy", m[1].hl)
     assert.truthy(m[1].text:find("finding users", 1, true))
     -- A braille frame precedes the label.
     assert.truthy(vim.tbl_contains(require("grannos.ui.spinner").FRAMES, m[1].text:match("(%S+) finding")))

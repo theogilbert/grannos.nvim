@@ -1,11 +1,12 @@
 --- In-flight indicator for symbol lookups (`explore.find` / `explore.describe`
 --- driven by the hover and goto keys).
 ---
---- Deliberately quiet: an animated braille spinner and a short label as dim
---- virtual text at the end of the line the symbol sits on. It costs no screen
---- space, is anchored to the thing being looked up, and leaves no trace in
---- `:messages` — a lookup that resolves quickly should be barely noticed, while
---- one waiting on a slow catalog says so where the user is already looking.
+--- An animated braille spinner and a short label as virtual text at the end of
+--- the line the symbol sits on, in the same amber the gutter gives a running
+--- query. It costs no screen space, is anchored to the thing being looked up,
+--- and leaves no trace in `:messages` — but it is coloured to be seen: a lookup
+--- that waits on a slow catalog has to say so, or the user is left staring at
+--- an unchanged screen wondering whether the key registered at all.
 ---
 --- Marks are extmarks, so they follow the line through edits, and several
 --- lookups can be outstanding at once. Every `start` must be matched by a
@@ -33,7 +34,7 @@ local function draw(token, glyph)
   if not row then return end
   vim.api.nvim_buf_set_extmark(token.bufnr, NS, row, 0, {
     id           = token.mark_id,
-    virt_text    = { { ("  %s %s"):format(glyph, token.label), "GrannosExplorerDim" } },
+    virt_text    = { { ("  %s %s…"):format(glyph, token.label), "GrannosSymbolBusy" } },
     virt_text_pos = "eol",
     hl_mode      = "combine",
   })

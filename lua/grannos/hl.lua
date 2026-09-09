@@ -111,6 +111,10 @@ local function setup_highlights()
   vim.api.nvim_set_hl(0, "GrannosExplorerDocument",    { fg = "#D19A66",  default = true })
   vim.api.nvim_set_hl(0, "GrannosExplorerGroup",       { fg = "#848D9E",  default = true })
   vim.api.nvim_set_hl(0, "GrannosExplorerDim",         { fg = "#6B7691",  default = true })
+  -- Symbol lookups in flight read as "something is running", the same amber the
+  -- gutter uses for a running query, so the indicator is noticed at a glance
+  -- rather than blending into the code it sits beside.
+  vim.api.nvim_set_hl(0, "GrannosSymbolBusy",          { link = "GrannosQueryRunning", default = true })
   -- Global (not NS_ID-scoped): applied via 'winhighlight' on windows that must
   -- NOT be linked to NS_ID via nvim_win_set_hl_ns, since that takes precedence
   -- over 'winhighlight' and would silently defeat it.

@@ -16,6 +16,7 @@ local table_fmt      = require("grannos.table")
 local hl             = require("grannos.hl")
 local config         = require("grannos.config")
 local col_picker     = require("grannos.ui.col_picker")
+local col_selection  = require("grannos.col_selection")
 local connections    = require("grannos.connections")
 local export         = require("grannos.export")
 local client         = require("grannos.client")
@@ -658,6 +659,7 @@ local function get_or_create_buf_state(buf_key, buf_title)
     if not buf_state.raw_columns then return end
     col_picker.open(buf_state.raw_columns, buf_state.vis_columns, function(sel)
       buf_state.vis_columns = sel
+      col_selection.save(buf_state.raw_columns, sel)
       render_table(buf_state)
     end)
   end, { desc = "Select displayed columns", silent = true })
@@ -1052,7 +1054,8 @@ function M.append_batch_error(idx, total, msg, sql)
   render_segments(buf_state)
 end
 
---- Display the SELECT results, preserving column visibility when columns match the previous query.
+--- Display the SELECT results, preserving column visibility when columns match the
+--- previous query, and otherwise restoring this project's saved selection for them.
 --- @param columns       string[]
 --- @param rows          table[]
 --- @param rows_returned integer
@@ -1063,7 +1066,9 @@ function M.show_results(columns, rows, rows_returned, rows_total, duration_ms, m
   local buf_state = active_buf_state()
   stop_loading(buf_state)
   if not buf_state.raw_columns or not same_columns(buf_state.raw_columns, columns) then
-    buf_state.vis_columns = vim.list_extend({}, columns)
+    -- A selection saved for this project and this column list outranks the
+    -- default of showing everything; without one, show everything.
+    buf_state.vis_columns = col_selection.load(columns) or vim.list_extend({}, columns)
   end
   buf_state.raw_columns    = columns
   buf_state.raw_rows       = rows

@@ -91,6 +91,45 @@ describe("table.from_structured_data SpecialFloat handling", function()
   end)
 end)
 
+describe("table.from_structured_data multi-line cells", function()
+  it("renders embedded newlines as literal \\n so the row stays one line", function()
+    local trace = "Traceback:\n  line 1\n  line 2"
+    local tbl = table_fmt.from_structured_data({ { "error" }, { trace } }, 1, nil, ".")
+
+    assert.equals(3, #tbl.text)  -- header, separator, one data row
+    for _, line in ipairs(tbl.text) do
+      assert.is_nil(line:find("\n", 1, true))
+    end
+    assert.is_not_nil(tbl.text[3]:find("Traceback:\\n  line 1\\n  line 2", 1, true))
+  end)
+
+  it("escapes carriage returns, tabs and other control characters", function()
+    local tbl = table_fmt.from_structured_data(
+      { { "value" }, { "a\r\nb\tc\1d" } }, 1, nil, ".")
+    assert.is_not_nil(tbl.text[3]:find("a\\r\\nb\\tc\\x01d", 1, true))
+  end)
+
+  it("keeps every row the same display width as the header", function()
+    local rows = {
+      { "id", "note" },
+      { 1,    "one\ntwo" },
+      { 2,    "plain" },
+    }
+    local tbl = table_fmt.from_structured_data(rows, 1, nil, ".")
+
+    local width = vim.api.nvim_strwidth(tbl.text[1])
+    for _, line in ipairs(tbl.text) do
+      assert.equals(width, vim.api.nvim_strwidth(line))
+    end
+  end)
+
+  it("escapes newlines in header names too", function()
+    local tbl = table_fmt.from_structured_data({ { "two\nwords" }, { "x" } }, 1, nil, ".")
+    assert.is_not_nil(tbl.text[1]:find("two\\nwords", 1, true))
+    assert.equals(vim.api.nvim_strwidth(tbl.text[1]), vim.api.nvim_strwidth(tbl.text[3]))
+  end)
+end)
+
 describe("table.get_column_at_cursor", function()
   it("resolves the column at a given virtual cursor position, and nil on separators", function()
     local widths = { 5, 4 }  -- │<5 cols>│<4 cols>│

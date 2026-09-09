@@ -402,7 +402,12 @@ KEYMAPS ~
 
   H       Scroll left one column.
   L       Scroll right one column.
-  c       Open a column picker to choose which columns to display.
+  c       Open a column picker to choose which columns to display.  The
+          choice is remembered per project (the working directory) and
+          per column list, and is restored in later sessions whenever a
+          result comes back with the same columns.  Selections live in
+          `$XDG_DATA_HOME/grannos/col_selections/`; selecting every column
+          again forgets the entry.
   [       Go to the previous page of results.
   ]       Go to the next page of results.
   q       Close the results window.
