@@ -113,7 +113,9 @@ PANEL KEYMAPS ~
           driver header and an individual connection entry. Press q or
           <Esc> to close.
   K       Show connection details or error in a hover float. Press K again
-          to enter the float (then q or <Esc> to close it).
+          to enter the float (then q or <Esc> to close it).  A connection
+          whose password is saved shows a password line with the value
+          masked; one that prompts for its password shows no such line.
   R       Refresh the panel.
   q       Close the panel.
   g?      Show a keymap reference float.

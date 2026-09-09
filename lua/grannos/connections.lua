@@ -21,6 +21,12 @@ local config = require("grannos.config")
 
 local _cache = nil  -- cached parsed file contents; nil means not yet loaded
 
+--- Placeholder shown in place of a stored password, in the connection form and
+--- in the connections pane's hover. Fixed-width on purpose: it may stand for a
+--- password the client never sees the plaintext of, so there is no length to
+--- reflect and implying one would be a lie.
+M.PW_MASK = "********"
+
 --- Build the internal NUL-separated composite key for a connection.
 --- @param server string
 --- @param driver string
@@ -472,7 +478,7 @@ end
 --- @return table[]  empty when there is no secret param for this driver
 local function make_password_fields(pw_param, had_value, remembered)
   if not pw_param then return {} end
-  local PW_MASK = "********"
+  local PW_MASK = M.PW_MASK
   local raw, edited = "", false
   local pw_field = {
     key          = pw_param.key,

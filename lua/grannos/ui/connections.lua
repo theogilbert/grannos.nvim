@@ -409,6 +409,40 @@ local function open_hover_float(lines, title, border_hl, line_hl)
   })
 end
 
+--- Build the aligned "label  value" lines describing a stored connection.
+--- A stored password is reported as a masked line rather than omitted: whether
+--- one is saved is exactly what the hover is for, its value never is. A
+--- connection that only prompts for its password has nothing stored, so it gets
+--- no line at all.
+--- @param params     table        stored connection params
+--- @param labels     table        param key -> display label, from driver capabilities
+--- @param secret_key string|nil   the driver's secret param key, when known
+--- @return string[]
+function M.detail_lines(params, labels, secret_key)
+  -- Without capabilities the driver's secret key is unknown; "password" is the
+  -- key every driver that has no other one uses.
+  local pw_key = secret_key or "password"
+  local has_pw = type(params[pw_key]) == "string" and params[pw_key] ~= ""
+
+  local keys = {}
+  for k in pairs(params) do
+    if not HIDDEN_CONN_FIELDS[k] and k ~= pw_key then table.insert(keys, k) end
+  end
+  if has_pw then table.insert(keys, pw_key) end
+  table.sort(keys)
+
+  local label_w = 0
+  for _, k in ipairs(keys) do label_w = math.max(label_w, #(labels[k] or k)) end
+
+  local lines = {}
+  for _, k in ipairs(keys) do
+    local label = labels[k] or k
+    local value = (k == pw_key) and connections.PW_MASK or tostring(params[k])
+    table.insert(lines, label .. string.rep(" ", label_w - #label) .. "  " .. value)
+  end
+  return lines
+end
+
 --- K key handler: show connection details or error in a hover float.
 --- A second press makes the float focusable (so the user can scroll it).
 local function on_hover()
@@ -458,22 +492,8 @@ local function on_hover()
     end
   end
 
-  local keys = {}
-  for k in pairs(params) do
-    if not HIDDEN_CONN_FIELDS[k] and k ~= secret_key then table.insert(keys, k) end
-  end
-  table.sort(keys)
-
-  local label_w = 0
-  for _, k in ipairs(keys) do label_w = math.max(label_w, #(labels[k] or k)) end
-
-  local lines = {}
-  for _, k in ipairs(keys) do
-    local label = labels[k] or k
-    table.insert(lines, label .. string.rep(" ", label_w - #label) .. "  " .. tostring(params[k]))
-  end
-
-  open_hover_float(lines, connections.conn_display_name(entry.key), nil, nil)
+  open_hover_float(M.detail_lines(params, labels, secret_key),
+    connections.conn_display_name(entry.key), nil, nil)
 end
 
 
