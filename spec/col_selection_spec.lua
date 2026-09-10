@@ -73,11 +73,13 @@ describe("col_selection", function()
     assert.same({ "id" }, col_selection.load(COLS))
   end)
 
-  it("scopes a selection to its column list", function()
+  it("scopes a stored entry to its exact column list", function()
     col_selection.save(COLS, { "id" })
+    -- Nothing in common: no entry, and none of the hidden names are here either.
     assert.is_nil(col_selection.load({ "a", "b" }))
-    -- Same names, different order: a different result shape.
-    assert.is_nil(col_selection.load({ "name", "id", "email", "created_at" }))
+    -- Same names, different order: a different result shape, so the entry does
+    -- not apply. Only the hidden names do, in the new result's own order.
+    assert.same({ "id" }, col_selection.load({ "name", "id", "email", "created_at" }))
   end)
 
   it("overwrites an earlier selection for the same columns", function()
@@ -113,6 +115,58 @@ describe("col_selection", function()
     col_selection.clear_cache()
 
     assert.same({ "name", "id" }, col_selection.load(COLS))
+  end)
+
+  it("reuses hidden columns for a result the exact column list never saw", function()
+    col_selection.save(COLS, { "id", "name", "created_at" })  -- hides email
+
+    assert.same({ "id", "name", "status" },
+      col_selection.load({ "id", "name", "email", "status" }))
+  end)
+
+  it("keeps the new result's own order when applying hidden columns", function()
+    col_selection.save(COLS, { "created_at", "id" })  -- hides name and email
+
+    assert.same({ "status", "id", "created_at" },
+      col_selection.load({ "status", "id", "name", "created_at" }))
+  end)
+
+  it("hidden columns survive a restart", function()
+    col_selection.save(COLS, { "id", "name", "created_at" })
+    col_selection.clear_cache()
+
+    assert.same({ "id", "extra" }, col_selection.load({ "id", "email", "extra" }))
+  end)
+
+  it("says nothing about a result that has none of the hidden columns", function()
+    col_selection.save(COLS, { "id", "name", "created_at" })
+
+    assert.is_nil(col_selection.load({ "total", "bucket" }))
+  end)
+
+  it("an exact selection outranks the hidden set, keeping its display order", function()
+    col_selection.save(COLS, { "created_at", "id" })  -- hides name and email
+
+    -- The entry wins for this column list, so the order the user chose survives…
+    assert.same({ "created_at", "id" }, col_selection.load(COLS))
+    -- …while any other result falls back to the hidden names, in its own order.
+    assert.same({ "id", "created_at" }, col_selection.load({ "id", "name", "created_at" }))
+  end)
+
+  it("showing a column again un-hides it project-wide", function()
+    col_selection.save(COLS, { "id", "name", "created_at" })
+    assert.same({ "id", "status" }, col_selection.load({ "id", "email", "status" }))
+
+    col_selection.save(COLS, COLS)  -- every column back
+
+    assert.is_nil(col_selection.load({ "id", "email", "status" }))
+  end)
+
+  it("scopes hidden columns to their project", function()
+    col_selection.save(COLS, { "id" })
+    cd(proj_b)
+
+    assert.is_nil(col_selection.load({ "id", "email", "status" }))
   end)
 
   it("ignores an unparsable store rather than erroring", function()

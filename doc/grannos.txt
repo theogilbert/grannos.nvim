@@ -409,10 +409,15 @@ KEYMAPS ~
   L       Scroll right one column.
   c       Open a column picker to choose which columns to display.  The
           choice is remembered per project (the working directory) and
-          per column list, and is restored in later sessions whenever a
-          result comes back with the same columns.  Selections live in
+          restored in later sessions: a result with the same column list
+          comes back with the same columns in the same order, and any
+          other result simply drops the columns you have hidden anywhere
+          in the project, so editing the query does not lose the choice.
+          Hiding is therefore by name — hide `tenant_id` once and it is
+          gone from every result in the project that has one; show it
+          again anywhere and it comes back everywhere.  Selections live in
           `$XDG_DATA_HOME/grannos/col_selections/`; selecting every column
-          again forgets the entry.
+          again forgets the entry and un-hides those names.
   [       Go to the previous page of results.
   ]       Go to the next page of results.
   q       Close the results window.

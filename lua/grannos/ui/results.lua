@@ -1055,7 +1055,8 @@ function M.append_batch_error(idx, total, msg, sql)
 end
 
 --- Display the SELECT results, preserving column visibility when columns match the
---- previous query, and otherwise restoring this project's saved selection for them.
+--- previous query, and otherwise restoring what this project remembers for them
+--- (a selection saved for this exact column list, else its hidden columns).
 --- @param columns       string[]
 --- @param rows          table[]
 --- @param rows_returned integer
@@ -1066,8 +1067,9 @@ function M.show_results(columns, rows, rows_returned, rows_total, duration_ms, m
   local buf_state = active_buf_state()
   stop_loading(buf_state)
   if not buf_state.raw_columns or not same_columns(buf_state.raw_columns, columns) then
-    -- A selection saved for this project and this column list outranks the
-    -- default of showing everything; without one, show everything.
+    -- What this project remembers outranks the default of showing everything:
+    -- a selection saved for this exact column list, or failing that the columns
+    -- hidden anywhere in the project. Neither, and everything shows.
     buf_state.vis_columns = col_selection.load(columns) or vim.list_extend({}, columns)
   end
   buf_state.raw_columns    = columns
