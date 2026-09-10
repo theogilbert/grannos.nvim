@@ -135,9 +135,12 @@ COMMANDS                                                    *grannos-commands*
 
                                                              *:DbAssociate*
 :DbAssociate
-    Open a picker listing all currently open connections. Selecting one
-    associates the current buffer with that connection. The buffer can then
-    be used to execute queries.
+    Open a picker float listing all currently open connections: a search
+    box on top, the connections below, with the buffer's current one
+    marked "●". Type to filter, <Down>/<C-n> and <Up>/<C-p> to move, <CR>
+    to select, <Esc> to clear the filter (again to close), <C-c> to close.
+    Selecting one associates the current buffer with that connection. The
+    buffer can then be used to execute queries.
 
                                                                *:DbAttach*
 :DbAttach

@@ -7,6 +7,7 @@ local connections       = require("grannos.connections")
 local executor          = require("grannos.executor")
 local explorer          = require("grannos.ui.explorer")
 local conn_label        = require("grannos.ui.conn_label")
+local conn_picker       = require("grannos.ui.conn_picker")
 local connections_panel = require("grannos.ui.connections")
 local selection         = require("grannos.selection")
 local gutter            = require("grannos.ui.gutter")
@@ -277,24 +278,17 @@ function M._send_connect(name, params, after_connect)
   end)
 end
 
---- Prompt the user to associate the current buffer with one of the open connections.
+--- Prompt the user to associate the current buffer with one of the open connections,
+--- using the search-and-list picker float.
 function M.associate()
-  local keys = vim.tbl_keys(state.conns)
-  if #keys == 0 then
+  if vim.tbl_isempty(state.conns) then
     vim.notify("grannos: no open connections — open the connection panel with :DbConnections", vim.log.levels.WARN)
     return
   end
-  table.sort(keys)
-  vim.ui.select(keys, {
-    prompt      = "Associate connection:",
-    format_item = function(key)
-      local conn  = state.conns[key]
-      local label = conn and conn.driver_label
-      return label and (connections.conn_display_name(key) .. " (" .. label .. ")") or connections.conn_display_name(key)
-    end,
-  }, function(key)
-    if not key then return end
-    set_buf_conn(vim.api.nvim_get_current_buf(), key)
+  local bufnr = vim.api.nvim_get_current_buf()
+  conn_picker.open(state.conns, state.buf_conns[bufnr], function(key)
+    if not vim.api.nvim_buf_is_valid(bufnr) then return end
+    set_buf_conn(bufnr, key)
     vim.notify(("grannos: buffer associated with %q"):format(connections.conn_display_name(key)), vim.log.levels.INFO)
   end)
 end

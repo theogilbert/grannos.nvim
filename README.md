@@ -129,7 +129,7 @@ Once a connection is open, associate it with the buffer you want to query:
 :DbAssociate
 ```
 
-A picker lists all currently open connections. Select one — the buffer is now linked and a "Connected to name (driver)" label appears at the bottom of the window.
+A picker floats over the editor: a search box on top, every currently open connection listed below (the buffer's current one marked with `●`). Type to filter, `<Down>`/`<Up>` (or `<C-n>`/`<C-p>`) to move, `<CR>` to select, `<Esc>` to clear the filter then close. The buffer is now linked and a "Connected to name (driver)" label appears at the bottom of the window.
 
 ### 3. Execute queries
 
