@@ -418,6 +418,8 @@ KEYMAPS ~
           again anywhere and it comes back everywhere.  Selections live in
           `$XDG_DATA_HOME/grannos/col_selections/`; selecting every column
           again forgets the entry and un-hides those names.
+  o       Open the LOB cell under the cursor in a scratch buffer.
+  S       Save the LOB cell under the cursor to a file on disk (prompted).
   [       Go to the previous page of results.
   ]       Go to the next page of results.
   q       Close the results window.

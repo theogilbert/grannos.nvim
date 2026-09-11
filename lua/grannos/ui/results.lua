@@ -554,7 +554,7 @@ local function on_open_lob_in_buffer(buf_state)
   end)
 end
 
---- Handle the "s" keymap in the results pane: save the LOB cell under the
+--- Handle the "S" keymap in the results pane: save the LOB cell under the
 --- cursor's full content straight to a local file (prompted), without ever
 --- routing it through this buffer — the right choice for binary content.
 --- @param buf_state table
@@ -687,7 +687,7 @@ local function get_or_create_buf_state(buf_key, buf_title)
     { desc = "Toggle thousands separator for column", silent = true })
   buf:set_keymap("n", "o", function() on_open_lob_in_buffer(buf_state) end,
     { desc = "Open LOB cell in buffer", silent = true })
-  buf:set_keymap("n", "s", function() on_save_lob_to_disk(buf_state) end,
+  buf:set_keymap("n", "S", function() on_save_lob_to_disk(buf_state) end,
     { desc = "Save LOB cell to disk", silent = true })
   return buf_state
 end
