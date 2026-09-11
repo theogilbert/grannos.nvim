@@ -14,6 +14,7 @@ local gutter            = require("grannos.ui.gutter")
 local ts_queries        = require("grannos.ts_queries")
 local symbols           = require("grannos.symbols")
 local log               = require("grannos.log")
+local session_params    = require("grannos.session_params")
 local hover             = require("grannos.ui.hover")
 local symbol_busy       = require("grannos.ui.symbol_busy")
 
@@ -245,6 +246,29 @@ end
 -- Fields in connection params that must not be forwarded to the server.
 local CLIENT_ONLY_FIELDS = { requires_password = true }
 
+--- Replay the session settings remembered for `name` (see session_params.lua)
+--- onto the freshly opened connection `conn_id`. The backend forgets these
+--- with every restart, so this is what makes them survive one. Values are
+--- filtered through the driver's current session_params, so a setting the
+--- driver no longer declares is dropped rather than rejected. A failure is
+--- reported but does not affect the connection itself.
+--- @param name    string  composite connection key
+--- @param conn_id any     backend connection id
+--- @param driver  string
+local function restore_session_params(name, conn_id, driver)
+  local stored = session_params.get(name)
+  if not stored then return end
+  local caps   = client.capabilities() or { drivers = {} }
+  local values = connections.build_session_values(caps, driver, stored)
+  if next(values) == nil then return end
+  client.set_session(conn_id, values, function(err)
+    if err then
+      vim.notify(("grannos: could not restore session settings for %q — %s")
+        :format(connections.conn_display_name(name), err), vim.log.levels.WARN)
+    end
+  end)
+end
+
 --- Send the "connect" request to the backend and register the connection on success.
 --- @param name          string
 --- @param params        table
@@ -274,6 +298,7 @@ function M._send_connect(name, params, after_connect)
     state.conns[name] = { conn_id = result.connection_id, driver = driver, key = name, driver_label = driver_label }
     vim.notify(("grannos: connected to %q (%s)"):format(display, driver_label), vim.log.levels.INFO)
     connections_panel.refresh()
+    restore_session_params(name, result.connection_id, driver)
     if after_connect then after_connect(name) end
   end)
 end
@@ -520,9 +545,10 @@ end
 
 --- Open a form to view/change a live connection's runtime-only session
 --- settings (session.set/session.get — see docs/protocol.md), e.g.
---- Prometheus's query_mode. Never persisted to connections.json. Notifies
---- and does nothing if the connection isn't open or its driver has no
---- session settings.
+--- Prometheus's query_mode. Never persisted to connections.json, but the
+--- submitted values are remembered client-side (session_params.lua) and
+--- replayed on the next connect. Notifies and does nothing if the connection
+--- isn't open or its driver has no session settings.
 --- @param key string  composite connection key
 function M.open_session_settings_for(key)
   local conn = state.conns[key]
@@ -548,6 +574,7 @@ function M.open_session_settings_for(key)
       on_submit = function(values, done)
         local session_values = connections.build_session_values(caps, conn.driver, values)
         client.set_session(conn.conn_id, session_values, function(err2)
+          if not err2 then session_params.save(key, session_values) end
           done(err2)
         end)
       end,

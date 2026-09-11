@@ -183,6 +183,7 @@ function M.delete(key)
   end
   g[name] = nil
   write_data(data)
+  require("grannos.session_params").delete(key)  -- lazy: session_params requires this module
   vim.notify(("grannos: deleted connection %q"):format(name), vim.log.levels.INFO)
 end
 
@@ -201,6 +202,7 @@ function M.delete_group(server, driver, group)
   local count = vim.tbl_count(d.groups[group])
   d.groups[group] = nil
   write_data(data)
+  require("grannos.session_params").delete_group(server, driver, group)
   local label = group ~= "" and group or "(no group)"
   vim.notify(("grannos: deleted group %q and %d connection(s)"):format(label, count), vim.log.levels.INFO)
 end
@@ -940,6 +942,7 @@ function M.edit(key, caps, callback)
       end
       upsert(data2, server, driver, driver_label, new_group, new_name, params)
       write_data(data2)
+      require("grannos.session_params").rename(key, new_key)
       vim.notify(("grannos: saved %q"):format(new_name), vim.log.levels.INFO)
       local final = (pw ~= nil and pw ~= "")
         and vim.tbl_extend("force", params, { [pw_key] = pw }) or params
