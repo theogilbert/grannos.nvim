@@ -584,221 +584,87 @@ local LANGUAGE_TO_FT = {
   promql = "promql",
 }
 
---- Interactively pick a connection from `caps` and call `callback(key, params)`.
---- Proposes already-open connections first; selecting one calls back with `params = nil`
---- (the caller should associate rather than reconnect). Falls through to the
---- driver/group/connection wizard when there are no open connections, or when
---- "[+ New connection]" is chosen.
---- Skips driver and/or group steps when there is only one choice.
---- Calls `callback(nil)` on cancel.
+--- Interactively pick a saved connection and call `callback(key, params)`,
+--- from a single searchable float listing every connection saved for the
+--- active server (see ui/conn_picker.lua). Connections already open are
+--- listed first and marked "●"; selecting one calls back with `params = nil`
+--- (the caller should associate rather than reconnect). Selecting a closed one
+--- prompts for its password when required. The list ends with
+--- "[+ New connection]", which opens the new-connection wizard — as does
+--- picking with no saved connections at all. Calls `callback(nil)` on cancel.
 --- @param caps       table   server capabilities (from client.ensure_capabilities)
---- @param active_set table   { [conn_key] = true } for all currently open connections
---- @param filetype   string  current buffer filetype, used to rank drivers
+--- @param opts       { active_set: table<string, boolean>, current_key: string|nil, filetype: string }
+---   .active_set  { [conn_key] = true } for all currently open connections
+---   .current_key the connection the caller's buffer is on now, if any
+---   .filetype    current buffer filetype: connections whose driver speaks it sort first
 --- @param callback   fun(key: string|nil, params: table|nil)
-function M.pick(caps, active_set, filetype, callback)
+function M.pick(caps, opts, callback)
   local server      = caps.server or ""
   local server_data = M.load(server)
+  local active_set  = opts.active_set or {}
 
-  --- Show the driver/group/connection wizard (the original, full `pick` flow).
-  local function pick_driver()
-
-  -- Build a rank map from caps so driver ordering is data-driven, not hardcoded.
-  -- rank 1 = one of the driver's languages maps to the current filetype,
-  -- rank 2 = generic driver (no declared languages),
-  -- rank 3 = specialty driver for a different filetype.
-  -- Connection count (descending) breaks ties within a rank.
-  local rank_map = {}
+  -- Driver rank from caps: 1 = one of the driver's languages maps to the
+  -- current filetype, 2 = generic driver (no declared languages), 3 = a
+  -- specialty driver for a different filetype.
+  local rank_map, caps_label = {}, {}
   for _, d in ipairs(caps.drivers or {}) do
     local langs = d.languages or {}
     local rank = #langs == 0 and 2 or 3
     for _, lang in ipairs(langs) do
-      if LANGUAGE_TO_FT[lang] == filetype then rank = 1; break end
+      if LANGUAGE_TO_FT[lang] == opts.filetype then rank = 1; break end
     end
-    rank_map[d.driver] = rank
-  end
-
-  -- Build label map from caps for drivers not yet in server_data.
-  local caps_label = {}
-  for _, d in ipairs(caps.drivers or {}) do
+    rank_map[d.driver]   = rank
     caps_label[d.driver] = d.label or d.driver
   end
 
-  -- Count saved connections per driver so busier drivers sort first within a rank.
-  local driver_counts = {}
+  local rows = {}
   for driver_id, driver_data in pairs(server_data) do
-    local total = 0
-    for _, gconns in pairs(driver_data.groups or {}) do total = total + vim.tbl_count(gconns) end
-    driver_counts[driver_id] = total
-  end
-
-  -- Collect all known drivers: those with saved connections plus all caps drivers.
-  local driver_id_set = {}
-  for driver_id, driver_data in pairs(server_data) do
-    for _, group_conns in pairs(driver_data.groups or {}) do
-      if next(group_conns) then driver_id_set[driver_id] = true; break end
-    end
-  end
-  for _, d in ipairs(caps.drivers or {}) do
-    driver_id_set[d.driver] = true
-  end
-  local driver_ids = vim.tbl_keys(driver_id_set)
-  table.sort(driver_ids, function(a, b)
-    local ra, rb = rank_map[a] or 2, rank_map[b] or 2
-    if ra ~= rb then return ra < rb end
-    local ca, cb = driver_counts[a] or 0, driver_counts[b] or 0
-    if ca ~= cb then return ca > cb end
-    return a < b
-  end)
-
-  --- Show the connection list for (driver_id, group) and call callback on selection.
-  --- @param driver_id string
-  --- @param group     string
-  local function do_pick_conn(driver_id, group)
-    local driver_data = server_data[driver_id] or {}
-    local group_conns = ((driver_data.groups or {})[group]) or {}
-    local items = {}
-    for name, params in pairs(group_conns) do
-      local key = M.conn_key(server, driver_id, group, name)
-      table.insert(items, { key = key, params = params })
-    end
-    table.sort(items, function(a, b) return M.conn_display_name(a.key) < M.conn_display_name(b.key) end)
-    table.insert(items, { key = "[+ New connection]" })
-
-    vim.ui.select(items, {
-      prompt      = "Connection:",
-      format_item = function(item)
-        if not item.params then return item.key end
-        local dn = M.conn_display_name(item.key)
-        if active_set[item.key] then dn = dn .. "  [connected]" end
-        return dn
-      end,
-    }, function(choice)
-      if not choice then callback(nil) return end
-      if not choice.params then
-        M.create(caps, callback, { driver = driver_id, group = group })
-        return
-      end
-      prompt_password(caps, driver_id, choice.params, function(params)
-        if not params then callback(nil) return end
-        callback(choice.key, params)
-      end)
-    end)
-  end
-
-  --- Show the group picker for `driver_id`, then delegate to do_pick_conn.
-  --- Uses a flat list when the total connection count is at or below the threshold.
-  --- @param driver_id string
-  local function do_pick_group(driver_id)
-    local driver_data = server_data[driver_id] or {}
-    local groups = {}
+    local label = driver_data.label or caps_label[driver_id] or driver_id
     for group, group_conns in pairs(driver_data.groups or {}) do
-      if next(group_conns) then table.insert(groups, group) end
-    end
-    table.sort(groups)
-
-    if #groups <= 1 then
-      do_pick_conn(driver_id, groups[1] or "")
-      return
-    end
-
-    -- Count total connections across all groups.
-    local total = 0
-    for _, g in ipairs(groups) do
-      total = total + vim.tbl_count((driver_data.groups or {})[g] or {})
-    end
-
-    local threshold = config.options.flat_conn_threshold or 5
-    if total <= threshold then
-      -- Flat list: show every connection as "group/name", sorted by display name.
-      local items = {}
-      for _, g in ipairs(groups) do
-        local group_conns = (driver_data.groups or {})[g] or {}
-        for conn_name, params in pairs(group_conns) do
-          local key   = M.conn_key(server, driver_id, g, conn_name)
-          local label = M.conn_display_name(key)
-          if active_set[key] then label = label .. "  [connected]" end
-          table.insert(items, { key = key, params = params, label = label })
-        end
+      for name, params in pairs(group_conns) do
+        local key     = M.conn_key(server, driver_id, group, name)
+        local open    = active_set[key] == true
+        local display = M.conn_display_name(key)
+        table.insert(rows, {
+          key     = key,
+          driver  = driver_id,
+          params  = params,
+          open    = open,
+          rank    = rank_map[driver_id] or 2,
+          display = display,
+          label   = (open and "● " or "  ") .. display .. "  (" .. label .. ")",
+          hl      = key == opts.current_key and "GrannosConnection" or nil,
+        })
       end
-      table.sort(items, function(a, b) return a.label < b.label end)
-      table.insert(items, { key = "[+ New connection]" })
-
-      vim.ui.select(items, {
-        prompt      = "Connection:",
-        format_item = function(item) return item.label or item.key end,
-      }, function(choice)
-        if not choice then callback(nil) return end
-        if not choice.params then M.create(caps, callback, { driver = driver_id }) return end
-        prompt_password(caps, driver_id, choice.params, function(params)
-          if not params then callback(nil) return end
-          callback(choice.key, params)
-        end)
-      end)
-      return
     end
-
-    local group_items = {}
-    for _, g in ipairs(groups) do
-      table.insert(group_items, { name = g, label = g ~= "" and g or "[No group]" })
-    end
-
-    vim.ui.select(group_items, {
-      prompt      = "Group:",
-      format_item = function(item) return item.label end,
-    }, function(choice)
-      if not choice then callback(nil) return end
-      vim.schedule(function() do_pick_conn(driver_id, choice.name) end)
-    end)
   end
 
-  if #driver_ids == 0 then
+  if #rows == 0 then
     M.create(caps, callback)
     return
   end
 
-  if #driver_ids == 1 then
-    do_pick_group(driver_ids[1])
-    return
-  end
-
-  local driver_items = {}
-  for _, driver_id in ipairs(driver_ids) do
-    local label = (server_data[driver_id] or {}).label or caps_label[driver_id] or driver_id
-    table.insert(driver_items, { driver_id = driver_id, label = label })
-  end
-
-  vim.ui.select(driver_items, {
-    prompt      = "Driver:",
-    format_item = function(item) return item.label end,
-  }, function(choice)
-    if not choice then callback(nil) return end
-    vim.schedule(function() do_pick_group(choice.driver_id) end)
+  table.sort(rows, function(a, b)
+    if a.open ~= b.open then return a.open end
+    if a.rank ~= b.rank then return a.rank < b.rank end
+    if a.display ~= b.display then return a.display < b.display end
+    return a.driver < b.driver
   end)
-  end
+  table.insert(rows, { label = "  [+ New connection]" })
 
-  local active_keys = vim.tbl_keys(active_set)
-  if #active_keys == 0 then
-    pick_driver()
-    return
-  end
-
-  table.sort(active_keys, function(a, b) return M.conn_display_name(a) < M.conn_display_name(b) end)
-  local active_items = {}
-  for _, key in ipairs(active_keys) do
-    local _, driver = M.conn_parts(key)
-    local label = M.conn_display_name(key) .. " (" .. resolve_driver_label(caps, server, driver) .. ")"
-    table.insert(active_items, { key = key, label = label })
-  end
-  table.insert(active_items, { key = nil, label = "[+ New connection]" })
-
-  vim.ui.select(active_items, {
-    prompt      = "Connection:",
-    format_item = function(item) return item.label end,
-  }, function(choice)
-    if not choice then callback(nil) return end
-    if not choice.key then pick_driver() return end
-    callback(choice.key, nil)
-  end)
+  require("grannos.ui.conn_picker").open({
+    rows      = rows,
+    title     = " Connections ",
+    on_cancel = function() callback(nil) end,
+    on_select = function(row)
+      if not row.key then M.create(caps, callback) return end
+      if row.open then callback(row.key, nil) return end
+      prompt_password(caps, row.driver, row.params, function(params)
+        if not params then callback(nil) return end
+        callback(row.key, params)
+      end)
+    end,
+  })
 end
 
 --- Interactively create a new connection via a single form, save it, and call `callback(key, params)`.

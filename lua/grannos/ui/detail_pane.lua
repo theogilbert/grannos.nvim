@@ -212,6 +212,8 @@ end
 ---                (default: "(no matches)")
 ---   .on_change   fn(item|nil)              called with the newly-selected item
 ---   .on_submit   fn(item|nil)|nil          called when <CR> is pressed in the search box
+---   .on_close    fn()|nil                  called once, after the float has closed for
+---                any reason (a key, a submit, or focus leaving it)
 ---   .extra_help  { lhs: string, desc: string, group: string }[]|nil   additional entries
 ---                shown by <C-h>'s help float, for keymaps a caller adds on its own windows
 ---   .restore_origin fun()|nil               where to return the cursor on an explicit close
@@ -281,6 +283,7 @@ function M.open_search_list(opts)
       if vim.api.nvim_win_is_valid(w) then pcall(vim.api.nvim_win_close, w, true) end
     end
     if restore then restore_origin() end
+    if opts.on_close then opts.on_close() end
   end
 
   --- Register another float window (e.g. a detail pane) as part of this group:

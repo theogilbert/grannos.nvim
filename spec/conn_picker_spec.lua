@@ -1,7 +1,6 @@
 require("grannos.hl").setup()
 require("grannos.config").setup()
 
-local connections = require("grannos.connections")
 local picker      = require("grannos.ui.conn_picker")
 
 --- Press `keys` synchronously in the current window.
@@ -32,13 +31,24 @@ local function list_lines()
   return {}
 end
 
-local function key(name) return connections.conn_key("srv", "postgres", "prod", name) end
-
-local CONNS = {
-  [key("alpha")] = { driver_label = "PostgreSQL" },
-  [key("beta")]  = { driver_label = "PostgreSQL" },
-  [key("gamma")] = { driver_label = "PostgreSQL" },
+local ROWS = {
+  { key = "alpha", label = "  prod/alpha  (PostgreSQL)" },
+  { key = "beta",  label = "● prod/beta  (PostgreSQL)", hl = "GrannosConnection" },
+  { key = "gamma", label = "  prod/gamma  (PostgreSQL)" },
 }
+
+--- Open the picker over ROWS, recording the selected row's key or a cancel.
+--- @return table  { chosen: string|nil, cancelled: boolean }
+local function open(rows)
+  local out = { chosen = nil, cancelled = false }
+  picker.open({
+    rows      = rows or ROWS,
+    title     = " Connections ",
+    on_select = function(row) out.chosen = row.key end,
+    on_cancel = function() out.cancelled = true end,
+  })
+  return out
+end
 
 describe("ui.conn_picker", function()
   after_each(function()
@@ -50,18 +60,9 @@ describe("ui.conn_picker", function()
     vim.cmd("silent! only")
   end)
 
-  it("lists every open connection, sorted, with its driver label", function()
-    picker.open(CONNS, nil, function() end)
-
-    assert.same({
-      "    prod/alpha  (PostgreSQL)",
-      "    prod/beta  (PostgreSQL)",
-      "    prod/gamma  (PostgreSQL)",
-    }, list_lines())
-  end)
-
-  it("marks the connection the caller is already on", function()
-    picker.open(CONNS, key("beta"), function() end)
+  -- The list pane indents every row by two columns.
+  it("lists every row's label in order", function()
+    open()
 
     assert.same({
       "    prod/alpha  (PostgreSQL)",
@@ -71,45 +72,46 @@ describe("ui.conn_picker", function()
   end)
 
   it("filters the list as the search text is typed", function()
-    picker.open(CONNS, nil, function() end)
+    open()
     type_filter("amm")
 
     assert.same({ "    prod/gamma  (PostgreSQL)" }, list_lines())
   end)
 
-  it("<CR> selects the highlighted connection and closes the float", function()
+  it("<CR> selects the highlighted row and closes the float", function()
     vim.cmd("new")
     local origin = vim.api.nvim_get_current_win()
 
-    local chosen
-    picker.open(CONNS, nil, function(k) chosen = k end)
+    local out = open()
     local input_win = vim.api.nvim_get_current_win()
 
     type_filter("beta")
     feed("<CR>")
 
-    assert.equals(key("beta"), chosen)
+    assert.equals("beta", out.chosen)
+    assert.is_false(out.cancelled)
     assert.is_false(vim.api.nvim_win_is_valid(input_win))
     assert.equals(origin, vim.api.nvim_get_current_win())
   end)
 
   it("<C-c> cancels without selecting", function()
-    local chosen
-    picker.open(CONNS, nil, function(k) chosen = k end)
+    local out = open()
     local input_win = vim.api.nvim_get_current_win()
 
     feed("<C-c>")
 
-    assert.is_nil(chosen)
+    assert.is_nil(out.chosen)
+    assert.is_true(out.cancelled)
     assert.is_false(vim.api.nvim_win_is_valid(input_win))
   end)
 
-  it("does nothing when there are no open connections", function()
-    picker.open({}, nil, function() end)
+  it("does nothing when there are no rows", function()
+    local out = open({})
 
     local floats = vim.tbl_filter(function(w)
       return vim.api.nvim_win_get_config(w).relative ~= ""
     end, vim.api.nvim_list_wins())
     assert.equals(0, #floats)
+    assert.is_false(out.cancelled)
   end)
 end)

@@ -1,4 +1,3 @@
-:DbAssociate	grannos.txt	/*:DbAssociate*
 :DbAttach	grannos.txt	/*:DbAttach*
 :DbCancelQuery	grannos.txt	/*:DbCancelQuery*
 :DbConnections	grannos.txt	/*:DbConnections*
@@ -45,7 +44,6 @@ grannos-server_cmd	grannos.txt	/*grannos-server_cmd*
 grannos-setup	grannos.txt	/*grannos-setup*
 grannos-thousands_separator	grannos.txt	/*grannos-thousands_separator*
 grannos-write-protection	grannos.txt	/*grannos-write-protection*
-grannos.associate()	grannos.txt	/*grannos.associate()*
 grannos.attach()	grannos.txt	/*grannos.attach()*
 grannos.buffers_for()	grannos.txt	/*grannos.buffers_for()*
 grannos.cancel_query()	grannos.txt	/*grannos.cancel_query()*

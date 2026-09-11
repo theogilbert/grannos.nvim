@@ -133,20 +133,19 @@ COMMANDS                                                    *grannos-commands*
 :DbConnections
     Toggle the connections panel sidebar.
 
-                                                             *:DbAssociate*
-:DbAssociate
-    Open a picker float listing all currently open connections: a search
-    box on top, the connections below, with the buffer's current one
-    marked "●". Type to filter, <Down>/<C-n> and <Up>/<C-p> to move, <CR>
-    to select, <Esc> to clear the filter (again to close), <C-c> to close.
-    Selecting one associates the current buffer with that connection. The
-    buffer can then be used to execute queries.
-
                                                                *:DbAttach*
-:DbAttach
-    Open a picker listing all saved connections. Selecting
+:DbAttach [{name}]
+    With {name}, connect to that saved connection directly (Tab-completion
+    is available). Without, open a picker float listing every saved
+    connection: a search box on top, the connections below as
+    "group/name (driver)". Connections already open are listed first and
+    marked "●"; the buffer's current one is highlighted. Type to filter,
+    <Down>/<C-n> and <Up>/<C-p> to move, <CR> to select, <Esc> to clear
+    the filter (again to close), <C-c> to close.
+    Selecting an open connection associates the current buffer with it;
+    selecting a closed one connects first (prompting for a password when
+    the connection requires one), then associates. Selecting
     "[+ New connection]" launches the new-connection wizard.
-    Tab-completion is available.
 
 :DbAttach {name}
     Connect directly to the named connection without showing the picker.
@@ -197,7 +196,7 @@ COMMANDS                                                    *grannos-commands*
 :DbLoadQueries
     Open the saved-queries picker for the connection associated with the
     current buffer. Requires the buffer to have an associated connection
-    (run |:DbAssociate| first if needed). Equivalent to `l` in the
+    (run |:DbAttach| first if needed). Equivalent to `l` in the
     connections panel. See |grannos-saved-queries|.
 
                                                            *:DbQueryLog*
@@ -497,8 +496,7 @@ Set |grannos-completion-enabled| to false to turn this off.
 If |i_CTRL-X_CTRL-O| offers SQL keywords rather than your schema, the buffer
 has no connection: 'omnifunc' is still Vim's own `sqlcomplete#Complete`. Check
 with `:set omnifunc?` — an attached buffer reads
-`v:lua.require'grannos.completion'.omnifunc`. Associate one with
-|:DbAssociate| or |:DbAttach|.
+`v:lua.require'grannos.completion'.omnifunc`. Attach one with |:DbAttach|.
 
 ================================================================================
 LUA API                                                          *grannos-api*
@@ -516,11 +514,6 @@ require("grannos").open_connections()
 require("grannos").attach([{name}])
     Open the connection picker, or connect directly to {name} if given.
     Equivalent to |:DbAttach|.
-
-                                                  *grannos.associate()*
-require("grannos").associate()
-    Open a picker of active connections and associate the current buffer
-    with the chosen one. Equivalent to |:DbAssociate|.
 
                                                  *grannos.disconnect()*
 require("grannos").disconnect({name})

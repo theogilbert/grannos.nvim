@@ -121,15 +121,15 @@ Status indicators next to each connection name:
 | `✗` | Last connection attempt failed (red) — press `K` for details |
 | `⠋…` | Connecting (animated spinner) |
 
-### 2. Associate a buffer
+### 2. Attach a buffer
 
-Once a connection is open, associate it with the buffer you want to query:
+From the buffer you want to query:
 
 ```
-:DbAssociate
+:DbAttach
 ```
 
-A picker floats over the editor: a search box on top, every currently open connection listed below (the buffer's current one marked with `●`). Type to filter, `<Down>`/`<Up>` (or `<C-n>`/`<C-p>`) to move, `<CR>` to select, `<Esc>` to clear the filter then close. The buffer is now linked and a "Connected to name (driver)" label appears at the bottom of the window.
+A picker floats over the editor: a search box on top, every saved connection listed below as `group/name (driver)`. Connections already open come first, marked with `●`; the buffer's current one is highlighted. Type to filter, `<Down>`/`<Up>` (or `<C-n>`/`<C-p>`) to move, `<CR>` to select, `<Esc>` to clear the filter then close. Picking an open connection just links the buffer to it; picking a closed one connects (prompting for the password if needed) and then links. `[+ New connection]` at the end opens the new-connection wizard. Once linked, a "Connected to name (driver)" label appears at the bottom of the window.
 
 ### 3. Execute queries
 
@@ -252,7 +252,6 @@ The window title bar shows the connection name and driver. A spinner is shown wh
 | Command | Description |
 |---------|-------------|
 | `:DbConnections` | Toggle the connections panel |
-| `:DbAssociate` | Associate the current buffer with an open connection |
 | `:DbAttach [name]` | Connect to a saved connection by name (or open a picker) |
 | `:DbNewConnection` | Open the new-connection wizard |
 | `:DbDeleteConnection <name>` | Remove a saved connection |
@@ -341,9 +340,6 @@ db.open_connections()
 -- Connect via picker, or directly by name.
 db.attach()
 db.attach("prod-mssql")
-
--- Associate the current buffer with an open connection (shows a picker).
-db.associate()
 
 -- Disconnect from a named connection.
 db.disconnect("prod-mssql")

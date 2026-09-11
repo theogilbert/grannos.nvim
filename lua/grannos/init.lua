@@ -7,7 +7,6 @@ local connections       = require("grannos.connections")
 local executor          = require("grannos.executor")
 local explorer          = require("grannos.ui.explorer")
 local conn_label        = require("grannos.ui.conn_label")
-local conn_picker       = require("grannos.ui.conn_picker")
 local connections_panel = require("grannos.ui.connections")
 local selection         = require("grannos.selection")
 local gutter            = require("grannos.ui.gutter")
@@ -218,7 +217,8 @@ function M.attach(name)
     M.ensure_backend_with_caps(function(caps)
       local active_set = {}
       for _, k in ipairs(M.active_keys()) do active_set[k] = true end
-      connections.pick(caps, active_set, ft, function(picked_name, params)
+      local opts = { active_set = active_set, current_key = state.buf_conns[bufnr], filetype = ft }
+      connections.pick(caps, opts, function(picked_name, params)
         if not picked_name then return end
         if not params then
           -- Picked an already-open connection: associate, don't reconnect.
@@ -300,21 +300,6 @@ function M._send_connect(name, params, after_connect)
     connections_panel.refresh()
     restore_session_params(name, result.connection_id, driver)
     if after_connect then after_connect(name) end
-  end)
-end
-
---- Prompt the user to associate the current buffer with one of the open connections,
---- using the search-and-list picker float.
-function M.associate()
-  if vim.tbl_isempty(state.conns) then
-    vim.notify("grannos: no open connections — open the connection panel with :DbConnections", vim.log.levels.WARN)
-    return
-  end
-  local bufnr = vim.api.nvim_get_current_buf()
-  conn_picker.open(state.conns, state.buf_conns[bufnr], function(key)
-    if not vim.api.nvim_buf_is_valid(bufnr) then return end
-    set_buf_conn(bufnr, key)
-    vim.notify(("grannos: buffer associated with %q"):format(connections.conn_display_name(key)), vim.log.levels.INFO)
   end)
 end
 
@@ -413,7 +398,7 @@ local function execute_sql(sql, bufnr, first_line)
     if next(state.conns) == nil then
       vim.notify("grannos: no active connection — use :DbConnections to connect", vim.log.levels.WARN)
     else
-      vim.notify("grannos: no active connection — run :DbAssociate first", vim.log.levels.WARN)
+      vim.notify("grannos: no active connection — run :DbAttach first", vim.log.levels.WARN)
     end
     return
   end

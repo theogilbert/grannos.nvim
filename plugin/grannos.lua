@@ -35,11 +35,6 @@ end, {
   complete = saved_connection_names,
 })
 
--- :DbAssociate   — pick an open connection to associate with the current buffer
-vim.api.nvim_create_user_command("DbAssociate", function(_)
-  db.associate()
-end, {})
-
 -- :DbNewConnection  — open the new-connection wizard
 vim.api.nvim_create_user_command("DbNewConnection", function(_)
   db.ensure_backend_with_caps(function(caps)
