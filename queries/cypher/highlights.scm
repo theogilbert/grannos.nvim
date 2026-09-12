@@ -106,6 +106,15 @@
 
 (relationship_type) @type
 
+; Label expression operators  :A&B  :A|B  :!A  (the wildcard "%" is
+; already an operator above)
+[
+  "&"
+  "!"
+] @operator
+
+(label_disjunction "|" @operator)
+
 ; ── Map keys  { key: value } ─────────────────────────────────────────────────
 
 (map_key) @property
