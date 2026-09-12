@@ -166,6 +166,22 @@ describe("symbols.at_cursor for Cypher", function()
       cypher_at('MATCH (n:A:B) SET n.age = 3', "age"))
   end)
 
+  it("scopes a property to every label in a label expression, negations excepted", function()
+    assert.same(
+      {
+        name  = "age",
+        type  = "property",
+        scope = { { name = "A", type = "label" }, { name = "B", type = "label" } },
+      },
+      cypher_at('MATCH (n:(A|B)&!C) SET n.age = 3', "age"))
+  end)
+
+  it("names a label inside a label expression", function()
+    assert.same(
+      { name = "B", type = "label", scope = {} },
+      cypher_at('MATCH (n:A&B) RETURN n', "B)"))
+  end)
+
   it("scopes a relationship property to its relationship type", function()
     assert.same(
       {

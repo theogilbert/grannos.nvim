@@ -1,6 +1,5 @@
---- Context-aware completion for SQL query buffers: table names after
---- FROM/JOIN/INTO, and column names in every position that resolves against
---- them, including through aliases.
+--- Context-aware completion for query buffers, per language: table and
+--- column names in SQL, labels, relationship types and properties in Cypher.
 ---
 --- Exposed as 'omnifunc', so <C-x><C-o> works with no completion plugin
 --- installed and any engine that wraps omnifunc picks it up for free.
@@ -10,11 +9,23 @@
 --- lookup that has to go to the server refills the popup in place when it
 --- lands. The cost of that server round trip is one catalog query per path,
 --- once per connection, forever — see the cache module.
-local cache   = require("grannos.completion.cache")
-local config  = require("grannos.config")
-local context = require("grannos.completion.context")
+---
+--- Each language is a module under `grannos.completion` exposing:
+---   `TRIGGER_CHARACTERS`  punctuation an engine should fire on, besides words
+---   `prime(conn_id)`      listings worth fetching on attach
+---   `at_cursor(bufnr, row, start_col, end_col)` → context or nil
+---   `candidates(conn_id, ctx, add, on_ready)`   feed candidates to `add`
+--- A buffer whose treesitter language is absent here has no completion.
+local cache  = require("grannos.completion.cache")
+local config = require("grannos.config")
 
 local M = {}
+
+--- treesitter language → module name.
+local LANGUAGES = {
+  sql    = "grannos.completion.sql",
+  cypher = "grannos.completion.cypher",
+}
 
 --- bufnr → connection key, for buffers this module is attached to.
 local attached = {}
@@ -66,125 +77,32 @@ local function add(out, seen, base, word, kind, menu)
   out[#out + 1] = { word = word, kind = kind, menu = menu }
 end
 
---- Resolve a source's query-text path to a full explore-tree path.
----
---- A query naming a table without its schema (`FROM users`) doesn't say where
---- the table lives, so on a driver with schemas the already-listed schemas are
---- searched for it. An unambiguous single hit wins; anything else yields nil
---- rather than a guess, and the position simply offers nothing.
---- @param conn_id  any
---- @param path     string[]  1 or 2 parts, as written in the query
---- @param on_ready fun()|nil
---- @return string[]|nil
-local function resolve_table_path(conn_id, path, on_ready)
-  local has_schemas = cache.has_schemas(conn_id, on_ready)
-  if has_schemas == nil then return nil end
-  if #path >= 2 or not has_schemas then return path end
-
-  local wanted, found = path[1]:lower(), nil
-  for _, schema in ipairs(cache.children(conn_id, {}, on_ready) or {}) do
-    for _, item in ipairs(cache.children(conn_id, { schema.name }, on_ready) or {}) do
-      if item.name:lower() == wanted then
-        if found then return nil end  -- same table name in two schemas
-        found = { schema.name, item.name }
-      end
-    end
-  end
-  return found
-end
-
---- Collect table-name candidates for a FROM/JOIN/INTO position.
---- @param conn_id  any
---- @param ctx      CompletionContext
---- @param base     string
---- @param out      table[]
---- @param seen     table<string, boolean>
---- @param on_ready fun()|nil
-local function table_candidates(conn_id, ctx, base, out, seen, on_ready)
-  if ctx.schema then
-    for _, item in ipairs(cache.children(conn_id, { ctx.schema }, on_ready) or {}) do
-      add(out, seen, base, item.name, "t", item.type)
-    end
-    return
-  end
-
-  local has_schemas = cache.has_schemas(conn_id, on_ready)
-  if has_schemas == nil then return end
-
-  local root = cache.children(conn_id, {}, on_ready) or {}
-  if not has_schemas then
-    -- SQLite: the root listing is the table list.
-    for _, item in ipairs(root) do
-      add(out, seen, base, item.name, "t", item.type)
-    end
-    return
-  end
-
-  for _, schema in ipairs(root) do
-    add(out, seen, base, schema.name, "s", "schema")
-  end
-  -- Unqualified table names are only worth listing when the schemas can be
-  -- swept without turning one keystroke into a query per schema. Past the
-  -- bound, the schema names above are the offer, and qualifying narrows it to
-  -- a single listing.
-  if #root <= config.options.completion.max_schema_scan then
-    for _, schema in ipairs(root) do
-      for _, item in ipairs(cache.children(conn_id, { schema.name }, on_ready) or {}) do
-        add(out, seen, base, item.name, "t", schema.name)
-      end
-    end
-  end
-end
-
---- Collect column-name candidates for a position that resolves against the
---- statement's FROM/JOIN sources.
---- @param conn_id  any
---- @param ctx      CompletionContext
---- @param base     string
---- @param out      table[]
---- @param seen     table<string, boolean>
---- @param on_ready fun()|nil
-local function column_candidates(conn_id, ctx, base, out, seen, on_ready)
-  local wanted = {}
-  if ctx.qualifier then
-    local src = require("grannos.symbols.sql_sources").find_source(ctx.sources, ctx.qualifier)
-    if src and src.path then wanted[1] = src end
-  else
-    -- An alias is itself worth completing here: it is what the user types
-    -- before the dot that then narrows to one table.
-    for _, src in ipairs(ctx.sources) do
-      if src.alias then add(out, seen, base, src.alias, "a", src.path and table.concat(src.path, ".") or "subquery") end
-      if src.path then wanted[#wanted + 1] = src end
-    end
-  end
-
-  for _, src in ipairs(wanted) do
-    local path = resolve_table_path(conn_id, src.path, on_ready)
-    if path then
-      local label = src.alias or path[#path]
-      for _, item in ipairs(cache.columns(conn_id, path, on_ready) or {}) do
-        -- explore.list reports a field's *data* type in `type`, not "column".
-        add(out, seen, base, item.name, "c", ("%s · %s"):format(item.type, label))
-      end
-    end
-  end
-end
-
 --- Build the candidate list for `ctx`, starting any fetch it needs.
+--- @param lang     table   language module
 --- @param conn_id  any
---- @param ctx      CompletionContext
+--- @param ctx      table   the language's context
 --- @param base     string
 --- @param on_ready fun()|nil  called once per fetch that completes
 --- @return table[]
-local function candidates(conn_id, ctx, base, on_ready)
+local function candidates(lang, conn_id, ctx, base, on_ready)
   local out, seen = {}, {}
-  if ctx.kind == "table" then
-    table_candidates(conn_id, ctx, base, out, seen, on_ready)
-  else
-    column_candidates(conn_id, ctx, base, out, seen, on_ready)
-  end
+  lang.candidates(conn_id, ctx, function(word, kind, menu)
+    add(out, seen, base, word, kind, menu)
+  end, on_ready)
   table.sort(out, function(a, b) return a.word:lower() < b.word:lower() end)
   return out
+end
+
+--- Return the language module for `bufnr`, or nil when its treesitter
+--- language is not one this completes.
+--- @param bufnr integer
+--- @return table|nil
+local function language_for(bufnr)
+  if not vim.api.nvim_buf_is_valid(bufnr) then return nil end
+  local ok, parser = pcall(vim.treesitter.get_parser, bufnr)
+  if not ok or not parser then return nil end
+  local name = LANGUAGES[parser:lang()]
+  return name and require(name) or nil
 end
 
 --- Return the connection id backing `bufnr`, or nil when it has none.
@@ -193,6 +111,22 @@ end
 --- @return any|nil
 function M.conn_id(bufnr)
   return conn_id_for(bufnr)
+end
+
+--- Return the punctuation a completion engine should fire on besides word
+--- characters: the union over every language, since an engine asks once for
+--- the source rather than per buffer. A character one language triggers on
+--- and another does not simply yields no context, and so no candidates, there.
+--- @return string[]
+function M.trigger_characters()
+  local out, seen = {}, {}
+  for _, name in pairs(LANGUAGES) do
+    for _, ch in ipairs(require(name).TRIGGER_CHARACTERS) do
+      if not seen[ch] then seen[ch] = true; out[#out + 1] = ch end
+    end
+  end
+  table.sort(out)
+  return out
 end
 
 --- Return the candidates for a cursor position, engine-agnostically.
@@ -208,12 +142,13 @@ end
 --- @return table[]  { word, kind, menu } entries
 function M.candidates_at(bufnr, row, col, base, on_ready)
   local conn_id = conn_id_for(bufnr)
-  if not conn_id then return {} end
+  local lang    = language_for(bufnr)
+  if not conn_id or not lang then return {} end
   local line      = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1] or ""
   local start_col = word_start(line, col)
-  local ctx       = context.at_cursor(bufnr, row, start_col, col)
+  local ctx       = lang.at_cursor(bufnr, row, start_col, col)
   if not ctx then return {} end
-  return candidates(conn_id, ctx, base or "", on_ready)
+  return candidates(lang, conn_id, ctx, base or "", on_ready)
 end
 
 --- Resolving a position can take several rounds: knowing the tree's shape is
@@ -231,11 +166,12 @@ local MAX_ROUNDS = 4
 --- @param bufnr     integer
 --- @param row       integer
 --- @param start_col integer
+--- @param lang      table   language module
 --- @param conn_id   any
---- @param ctx       CompletionContext
+--- @param ctx       table   the language's context
 --- @param round     integer
 --- @return fun()|nil
-function M._refiller(bufnr, row, start_col, conn_id, ctx, round)
+function M._refiller(bufnr, row, start_col, lang, conn_id, ctx, round)
   if round > MAX_ROUNDS then return nil end
   local fired = false
   return function()
@@ -247,8 +183,8 @@ function M._refiller(bufnr, row, start_col, conn_id, ctx, round)
       local r, c = unpack(vim.api.nvim_win_get_cursor(0))
       if r - 1 ~= row or c < start_col then return end
       local line = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1] or ""
-      local next_round = M._refiller(bufnr, row, start_col, conn_id, ctx, round + 1)
-      vim.fn.complete(start_col + 1, candidates(conn_id, ctx, line:sub(start_col + 1, c), next_round))
+      local next_round = M._refiller(bufnr, row, start_col, lang, conn_id, ctx, round + 1)
+      vim.fn.complete(start_col + 1, candidates(lang, conn_id, ctx, line:sub(start_col + 1, c), next_round))
     end)
   end
 end
@@ -269,18 +205,20 @@ function M.omnifunc(findstart, base)
   end
 
   local conn_id = conn_id_for(bufnr)
-  if not conn_id then return {} end
+  local lang    = language_for(bufnr)
+  if not conn_id or not lang then return {} end
 
   local start_col = word_start(line, col)
-  local ctx = context.at_cursor(bufnr, row, start_col, col)
+  local ctx = lang.at_cursor(bufnr, row, start_col, col)
   if not ctx then return {} end
 
-  return candidates(conn_id, ctx, base, M._refiller(bufnr, row, start_col, conn_id, ctx, 1))
+  return candidates(lang, conn_id, ctx, base, M._refiller(bufnr, row, start_col, lang, conn_id, ctx, 1))
 end
 
 local OMNIFUNC = "v:lua.require'grannos.completion'.omnifunc"
 
---- Claim 'omnifunc' for `bufnr` when its language is one this completes.
+--- Claim 'omnifunc' for `bufnr` when its language is one this completes, and
+--- fetch the listings that language wants warm before the first keystroke.
 --- Separate from `attach` because a buffer can gain a connection before it has
 --- a filetype — a scratch query buffer is associated and only then set to
 --- `sql` — and because Vim's own ftplugin points 'omnifunc' at
@@ -289,28 +227,24 @@ local OMNIFUNC = "v:lua.require'grannos.completion'.omnifunc"
 --- @param bufnr integer
 --- @return boolean  whether omnifunc is now ours
 local function enable(bufnr)
-  if not vim.api.nvim_buf_is_valid(bufnr) then return false end
-  local ok, parser = pcall(vim.treesitter.get_parser, bufnr)
-  if not ok or not parser or parser:lang() ~= "sql" then return false end
+  local lang = language_for(bufnr)
+  if not lang then return false end
   vim.bo[bufnr].omnifunc = OMNIFUNC
+  local conn_id = conn_id_for(bufnr)
+  if conn_id then lang.prime(conn_id) end
   return true
 end
 
 --- Attach completion to `bufnr` for connection `conn_key`.
 --- The association is recorded even when 'omnifunc' cannot be claimed yet; the
 --- FileType handler registered by `setup` claims it as soon as the buffer
---- becomes SQL. A no-op when completion is disabled in config.
+--- gains a language this completes. A no-op when completion is disabled.
 --- @param bufnr    integer
 --- @param conn_key string
 function M.attach(bufnr, conn_key)
   if not config.options.completion.enabled then return end
   attached[bufnr] = conn_key
-  if not enable(bufnr) then return end
-
-  -- One list call, so the tree's shape and its top level are known before the
-  -- first keystroke that needs them.
-  local conn = require("grannos").get_conn(conn_key)
-  if conn then cache.children(conn.conn_id, {}) end
+  enable(bufnr)
 end
 
 --- Register the FileType handler that re-claims 'omnifunc' on connected

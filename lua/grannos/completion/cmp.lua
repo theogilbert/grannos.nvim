@@ -22,6 +22,10 @@ local KINDS = {
   s = "Module",    -- schema
   c = "Field",     -- column
   a = "Variable",  -- FROM/JOIN alias
+  l = "Class",     -- label
+  r = "Reference", -- relationship type
+  p = "Property",  -- property
+  v = "Variable",  -- Cypher variable
 }
 
 --- Convert one omnifunc-shaped candidate into a cmp item.
@@ -54,12 +58,12 @@ function source:get_debug_name()
   return M.NAME
 end
 
---- "." must trigger a request: after `alias.` there is no word character for
---- cmp's own keyword matching to fire on, and that is exactly the position
---- where the qualified column list is most wanted.
+--- Punctuation that must trigger a request: after `alias.` or `(n:` there is
+--- no word character for cmp's own keyword matching to fire on, and those are
+--- exactly the positions where the list is most wanted.
 --- @return string[]
 function source:get_trigger_characters()
-  return { "." }
+  return completion.trigger_characters()
 end
 
 --- Return candidates for the cursor position.

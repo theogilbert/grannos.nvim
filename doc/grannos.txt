@@ -427,11 +427,11 @@ KEYMAPS ~
 ================================================================================
 COMPLETION                                                *grannos-completion*
 
-A SQL buffer associated with a connection gets 'omnifunc' set, so |i_CTRL-X_CTRL-O|
-completes database names in place. No completion plugin is required; any
-engine that wraps 'omnifunc' picks this up automatically.
+A SQL or Cypher buffer associated with a connection gets 'omnifunc' set, so
+|i_CTRL-X_CTRL-O| completes database names in place. No completion plugin is
+required; any engine that wraps 'omnifunc' picks this up automatically.
 
-What is offered depends on where the cursor sits:
+What is offered depends on where the cursor sits. In SQL:
 
   after FROM / JOIN / INTO / UPDATE
           Table and view names. Unqualified, schema names are offered too;
@@ -448,6 +448,26 @@ What is offered depends on where the cursor sits:
           annotated with its type and the alias it came from, plus the
           aliases themselves.
 
+In Cypher (Neo4j):
+
+  after `(n:`, `(n:Person:`, `(n:Person&` or `(n:Person|`
+          Node labels.
+
+  after `-[r:`
+          Relationship types.
+
+  after `n.`, or a key in a pattern's `{...}` map
+          The properties of whatever the variable's pattern binds it to —
+          the label(s) or relationship type — resolved exactly as
+          |grannos-hover-key| resolves it, each annotated with its owner. A
+          variable no pattern labels (`MATCH (n)`) offers the properties of
+          every label and relationship type, up to
+          |grannos-completion-max_label_scan| of them.
+
+  anywhere an expression starts
+          RETURN, WHERE, WITH, SET, DELETE, …: the variables the statement
+          binds, each annotated with its label or relationship type.
+
 Candidates are filtered by what has been typed, case-insensitively.
 
 AS YOU TYPE (nvim-cmp) ~                              *grannos-completion-cmp*
@@ -458,8 +478,8 @@ native nvim-cmp source named `grannos`: >lua
     sources = { { name = "grannos" }, { name = "buffer" } },
   })
 <
-Or, to keep it to SQL buffers alone: >lua
-  require("cmp").setup.filetype("sql", {
+Or, to keep it to query buffers alone: >lua
+  require("cmp").setup.filetype({ "sql", "cypher" }, {
     sources = { { name = "grannos" }, { name = "buffer" } },
   })
 <
@@ -469,9 +489,10 @@ config instead: >lua
   require("grannos.completion.cmp").setup()
 <
 The source is only active in a buffer that has a connection, and it triggers
-on "." as well as on word characters — after `alias.` there is no word for cmp
-to fire on, and that is where the column list matters most. Filtering is left
-to cmp, so its own sorting and fuzzy matching apply.
+on "." and ":" as well as on word characters — after `alias.` or `(n:` there
+is no word for cmp to fire on, and those are where the column or label list
+matters most. Filtering is left to cmp, so its own sorting and fuzzy matching
+apply.
 
 Prefer a native source over `cmp-omni`: 'omnifunc' refreshes its own popup when
 a listing arrives, which cmp neither sees nor honours, so a cold lookup through
@@ -485,8 +506,8 @@ IMPACT ON THE DATABASE ~
 Completion only ever sends `explore.list`, never `explore.describe`: it reads
 the catalog and never user table data. Each listing is fetched once and cached
 by the server permanently, so a database sees one catalog query per schema or
-table actually completed against, and nothing at all thereafter — a whole
-session of editing typically costs a handful of queries in total.
+table (or label) actually completed against, and nothing at all thereafter —
+a whole session of editing typically costs a handful of queries in total.
 
 Nothing blocks on the network. A lookup that has not been fetched yet returns
 what is already known and fills the popup in as the answer arrives.
@@ -674,6 +695,7 @@ All keys are optional.
     completion = {
       enabled         = true,
       max_schema_scan = 5,
+      max_label_scan  = 5,
     },
   })
 <
@@ -695,8 +717,9 @@ connections_file ~
 completion.enabled ~
   Type: `boolean`   Default: `true`
 
-  Set 'omnifunc' on SQL buffers that have a connection, so |i_CTRL-X_CTRL-O|
-  completes table and column names. See |grannos-completion|. Set to false
+  Set 'omnifunc' on SQL and Cypher buffers that have a connection, so
+  |i_CTRL-X_CTRL-O| completes table and column names, or labels,
+  relationship types and properties. See |grannos-completion|. Set to false
   to leave 'omnifunc' alone.
 
                                       *grannos-completion-max_schema_scan*
@@ -709,6 +732,16 @@ completion.max_schema_scan ~
   one keystroke into a listing per schema; writing `schema.` always lists
   just that one. Raise it for a database with many small schemas you query
   across; the cost is one catalog query per schema, once per session.
+
+                                       *grannos-completion-max_label_scan*
+completion.max_label_scan ~
+  Type: `number`   Default: `5`
+
+  The Cypher counterpart: how many labels and relationship types, counted
+  together, may have their properties listed to complete `n.` when no
+  pattern labels `n`. A graph with more than this offers nothing for an
+  unlabelled variable; writing the label (`(n:Person)`) always lists just
+  that one. The cost is one catalog query per label, once per session.
 
                                                       *grannos-queries_dir*
 queries_dir ~

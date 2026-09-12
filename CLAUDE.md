@@ -14,7 +14,7 @@ To run the suite headlessly from the CLI (no Neovim UI needed): `make ci`, or th
 
 Both go through `spec/minimal_init.lua`, which prepends this working tree to the runtimepath. That matters: an installed copy of grannos.nvim under `site/pack` otherwise sits ahead of the working tree in the child processes plenary spawns, and a spec run silently resolves some modules from each. Never run the specs without it.
 
-There is no build step for the Lua code. The precompiled treesitter parsers (`parser/sql.so`, `parser/cypher.so`, `parser/promql.so`) are binary and should not be regenerated manually.
+There is no build step for the Lua code. The precompiled treesitter parsers (`parser/sql.so`, `parser/cypher.so`, `parser/promql.so`) are built from the grammars in `../treesitters/` and copied here; never edit them by hand. To change one, edit its `grammar.js`, run `tree-sitter generate && tree-sitter test && tree-sitter build -o parser.so .` in the grammar directory, and copy `parser.so` over the matching `parser/<lang>.so` (keeping `queries/<lang>/highlights.scm` in sync with the grammar's `queries/highlights.scm`).
 
 ## Architecture
 
@@ -55,7 +55,7 @@ grannos.nvim is a Neovim database-client plugin that delegates all database work
 | `lua/grannos/selection.lua` | Visual selection extraction |
 | `lua/grannos/ts_queries.lua` | Treesitter helpers: statement at cursor, statements in range |
 | `lua/grannos/symbols/` | Per-language extraction of the symbol under the cursor into an `explore.find` query |
-| `lua/grannos/completion/` | Table/column completion for SQL buffers: `context.lua` classifies the cursor position, `cache.lua` holds `explore.list` results, `init.lua` serves 'omnifunc', `cmp.lua` is the nvim-cmp source |
+| `lua/grannos/completion/` | Per-language name completion in query buffers: `init.lua` serves 'omnifunc' and dispatches on treesitter language, `sql.lua` (with `context.lua` classifying the cursor position) and `cypher.lua` are the language modules, `repair.lua` the placeholder-parse trick they share, `cache.lua` holds `explore.list` results, `cmp.lua` is the nvim-cmp source |
 | `lua/grannos/hl.lua` | Highlight group definitions |
 | `lua/grannos/table.lua` | Column-aligned table rendering for results |
 | `lua/grannos/messages.lua` | Pure renderer for an execute response's `messages` (DBMS_OUTPUT, compilation warnings) |
@@ -83,13 +83,15 @@ Do not reintroduce client-side resolution against the explorer's cached tree. It
 
 ### Completion
 
-`lua/grannos/completion/` sets 'omnifunc' on connected SQL buffers. Two rules govern it:
+`lua/grannos/completion/` sets 'omnifunc' on connected SQL and Cypher buffers. Two rules govern it:
 
 **It never sends `explore.describe`.** A describe costs ~11 round trips per table and reads user data (every driver samples column values; DuckDB does one `SELECT DISTINCT` *per column*). `explore.list [schema, table, "columns"]` returns the same names and types in one catalog query that touches no user table. Completion is only ever allowed the latter — the same reason it must not use `explore.find`, whose walker fans out across the tree.
 
 **It never blocks.** Omnifunc is synchronous and the backend is not, so a lookup returns what `completion/cache.lua` already holds and starts a fetch for the rest; when that lands the popup is refilled in place via `vim.fn.complete`. Resolution is chained (root listing → a schema's tables → a table's columns), so each refill arms the next round, bounded by `MAX_ROUNDS`.
 
-`completion/context.lua` does not parse the buffer as written — mid-keystroke there is usually no `column_ref` to read. It replaces the partial word with a placeholder identifier and parses that repaired copy, which recovers every clause a query buffer completes in. The one shape the grammar cannot recover is an INSERT column list (`INSERT INTO t (`), matched textually instead. The FROM/JOIN source analysis itself is shared with symbol extraction in `symbols/sql_sources.lua` so an alias resolves identically whether hovered or completed.
+One module per treesitter language, dispatched from `completion/init.lua` on `parser:lang()`. Each exposes `TRIGGER_CHARACTERS`, `prime(conn_id)` (listings to warm on attach), `at_cursor(...)` → a language-specific context, and `candidates(conn_id, ctx, add, on_ready)`; the shared `add` handles prefix filtering and dedup. Adding a language means adding a module and registering it in `LANGUAGES`.
+
+No language parses the buffer as written — mid-keystroke there is usually no finished identifier to read. `completion/repair.lua` replaces the partial word with a placeholder identifier and parses that repaired copy, which recovers every clause a query buffer completes in. For SQL, `completion/context.lua` classifies the placeholder; the one shape the grammar cannot recover is an INSERT column list (`INSERT INTO t (`), matched textually instead. The FROM/JOIN source analysis itself is shared with symbol extraction in `symbols/sql_sources.lua` so an alias resolves identically whether hovered or completed. Cypher goes further and hands the placeholder straight to `symbols/cypher.lua`'s `extract`, which already names a label, relationship type or property and the scope its variable binds to; only the variable position (a bare word where an expression starts, offered the way SQL offers aliases) is decided in `completion/cypher.lua`. The Neo4j tree's group names (`entities`, `relationships`, `properties`) are assumed there rather than discovered, as `cache.columns` assumes `columns` for SQL. An unlabelled variable's property sweep across every label and relationship type is bounded by `completion.max_label_scan`, the counterpart of `max_schema_scan`.
 
 ### Session state and connection identity
 

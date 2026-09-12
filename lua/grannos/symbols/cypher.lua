@@ -14,18 +14,41 @@ local BINDERS = {
 local BINDER_TYPES = { node_pattern = true, relationship_detail = true }
 local STATEMENT_TYPES = { statement = true }
 
+--- Return the text of every `wanted` node under `node`, skipping anything
+--- inside a `label_negation`: `(n:Person&!Director)` binds n to Person, and
+--- a label it is guaranteed *not* to carry is no place to look for its
+--- properties.
+--- @param node   userdata
+--- @param wanted string
+--- @param bufnr  integer|string
+--- @return string[]
+local function asserted_texts(node, wanted, bufnr)
+  local out = {}
+  local function walk(n)
+    if n:type() == "label_negation" then return end
+    if n:type() == wanted then table.insert(out, util.text(n, bufnr)) end
+    for child in n:iter_children() do walk(child) end
+  end
+  walk(node)
+  return out
+end
+
 --- Return the scopes a pattern binds: one per label (or relationship type) it
 --- carries. A pattern with no label at all binds nothing, which is not an error
 --- — `MATCH (n)` is a perfectly good query, it just cannot narrow a property
 --- search to any one label.
+---
+--- A label expression's `&` and `|` both yield every label named: scopes of
+--- one type are alternatives to the backend, and a conjunction is answered
+--- correctly by either of its sides.
 --- @param pattern userdata  a node_pattern or relationship_detail
---- @param bufnr   integer
+--- @param bufnr   integer|string
 --- @return SearchScope[]
 local function pattern_scopes(pattern, bufnr)
   local binder = BINDERS[pattern:type()]
   if not binder then return {} end
   local scopes = {}
-  for _, name in ipairs(util.descendant_texts(pattern, binder.holder, bufnr)) do
+  for _, name in ipairs(asserted_texts(pattern, binder.holder, bufnr)) do
     table.insert(scopes, { name = name, type = binder.kind })
   end
   return scopes
@@ -33,10 +56,13 @@ end
 
 --- Map every variable bound anywhere in `node`'s statement to the scopes its
 --- pattern carries — Cypher's equivalent of SQL's alias-to-table bindings.
+--- An unlabelled pattern binds its variable to an empty list, so every
+--- variable the statement declares is a key. Public for completion, which
+--- offers these variables the way SQL completion offers aliases.
 --- @param node  userdata
---- @param bufnr integer
+--- @param bufnr integer|string  buffer, or the text the node was parsed from
 --- @return table<string, SearchScope[]>
-local function bindings(node, bufnr)
+function M.bindings(node, bufnr)
   local root = util.ancestor(node, STATEMENT_TYPES) or node:tree():root()
   local out = {}
   local function walk(n)
@@ -77,8 +103,8 @@ end
 ---   - a property access, `n.name` or `SET n.age = …`, scoped to the label or
 ---     relationship type its variable binds to
 ---   - a property key inside a pattern's map literal, `(n:Person {name: "x"})`
---- @param node  userdata  the named node under the cursor
---- @param bufnr integer
+--- @param node  userdata        the named node under the cursor
+--- @param bufnr integer|string  buffer, or the text the node was parsed from
 --- @return SymbolQuery|nil
 function M.extract(node, bufnr)
   if node:type() ~= "identifier" then return nil end
@@ -94,7 +120,7 @@ function M.extract(node, bufnr)
     return { name = util.text(node, bufnr), type = "relationship_type", scope = {} }
   end
 
-  local binds = bindings(node, bufnr)
+  local binds = M.bindings(node, bufnr)
 
   -- On a variable: describe what it binds to, the way a SQL alias resolves to
   -- its table. Ambiguous when its pattern carries several labels.

@@ -65,8 +65,8 @@ describe("completion.cmp", function()
     assert.equals("grannos", cmp_source.NAME)
   end)
 
-  it("triggers on '.', where a qualified column list is wanted", function()
-    assert.same({ "." }, cmp_source.source:get_trigger_characters())
+  it("triggers on '.' and ':', where a qualified column or a label list is wanted", function()
+    assert.same({ ".", ":" }, cmp_source.source:get_trigger_characters())
   end)
 
   it("is unavailable in a buffer with no connection", function()

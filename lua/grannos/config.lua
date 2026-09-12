@@ -38,10 +38,11 @@ M.defaults = {
   },
 
   completion = {
-    -- Set 'omnifunc' on connected SQL buffers, so <C-x><C-o> completes table
-    -- and column names. Only `explore.list` is ever sent, and the server
-    -- caches each listing permanently, so a database sees one catalog query
-    -- per schema/table touched and nothing thereafter.
+    -- Set 'omnifunc' on connected SQL and Cypher buffers, so <C-x><C-o>
+    -- completes table and column names — or labels, relationship types and
+    -- properties. Only `explore.list` is ever sent, and the server caches
+    -- each listing permanently, so a database sees one catalog query per
+    -- schema/table (or label) touched and nothing thereafter.
     enabled = true,
 
     -- Upper bound on schemas swept to offer *unqualified* table names. A
@@ -49,6 +50,12 @@ M.defaults = {
     -- one keystroke can never turn into a listing per schema; qualifying the
     -- reference (`schema.`) always lists just that one.
     max_schema_scan = 5,
+
+    -- The same bound for Cypher: how many labels and relationship types
+    -- (together) may be listed to offer property names for a variable no
+    -- pattern labels, as in `MATCH (n) RETURN n.`. A labelled variable
+    -- always lists just its own label's properties.
+    max_label_scan = 5,
   },
 
   -- Results window options.
