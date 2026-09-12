@@ -630,6 +630,7 @@ local function get_or_create_buf_state(buf_key, buf_title)
     buffer        = buf,
     table_data    = nil,
     segments      = {},
+    batch_total   = nil,
     raw_columns   = nil,
     raw_rows      = nil,
     vis_columns   = nil,
@@ -811,7 +812,18 @@ local function make_header(idx, total, sql)
   return { make_separator(idx, total), preview_text(sql) }
 end
 
---- Concatenate all batch segments into the results buffer.
+--- Return the progress line shown under a batch's segments while statements
+--- are still running, or nil once every one of `total` has landed.
+--- @param done  integer  segments appended so far
+--- @param total integer  statements in the batch
+--- @return string|nil
+local function batch_progress_line(done, total)
+  if done >= total then return nil end
+  return ("%s Executing %d queries… %d / %d completed"):format(ICON_RUNNING, total, done, total)
+end
+
+--- Concatenate all batch segments into the results buffer, followed by a
+--- progress line while the batch is still running.
 --- @param buf_state table
 local function render_segments(buf_state)
   local all_lines, all_rules = {}, {}
@@ -832,6 +844,12 @@ local function render_segments(buf_state)
     table.insert(all_rules, { higroup = "GrannosHelp",
       start = { hdr_lnum + 1, 0 }, finish = { hdr_lnum + 1, -1 } })
     table.insert(all_lines, "")
+  end
+  local progress = batch_progress_line(#buf_state.segments, buf_state.batch_total or 0)
+  if progress then
+    table.insert(all_lines, progress)
+    table.insert(all_rules, { higroup = "GrannosQueryRunning",
+      start = { #all_lines - 1, 0 }, finish = { #all_lines - 1, -1 } })
   end
   buf_state.buffer:set_content(all_lines)
   buf_state.buffer:apply_highlight(all_rules)
@@ -905,16 +923,18 @@ function M.set_source_table(path)
   end
 end
 
---- Prepare the results buffer for a batch of `n` statements.
+--- Prepare the results buffer for a batch of `n` statements: no segments yet,
+--- so the view is just the progress line, which each appended segment then
+--- advances.
 --- @param n integer
 function M.begin_batch(n)
   local buf_state = active_buf_state()
   stop_loading(buf_state)
   ensure_win(buf_state.buffer.buf_id)
-  buf_state.table_data = nil
-  buf_state.segments   = {}
-  buf_state.buffer:set_content({ ("Executing %d quer%s…"):format(n, n == 1 and "y" or "ies") })
-  buf_state.buffer:apply_highlight({})
+  buf_state.table_data  = nil
+  buf_state.segments    = {}
+  buf_state.batch_total = n
+  render_segments(buf_state)
 end
 
 --- Build a batch-view segment for one SELECT-type statement, honoring `sep_columns`.
