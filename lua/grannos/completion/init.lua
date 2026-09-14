@@ -261,6 +261,7 @@ function M.setup()
   -- cmp is not here yet, which is why its own config can call
   -- `require("grannos.completion.cmp").setup()` instead.
   pcall(function() require("grannos.completion.cmp").setup() end)
+  require("grannos.completion.indicator").setup(conn_id_for)
 
   vim.api.nvim_create_autocmd("FileType", {
     group    = vim.api.nvim_create_augroup("GrannosCompletion", { clear = true }),

@@ -18,6 +18,20 @@ local items = {}
 --- conn_id → { [path_key] = fun(items)[] }  callbacks waiting on an in-flight fetch
 local pending = {}
 
+--- Told `(conn_id, true)` when a fetch for that connection starts and
+--- `(conn_id, false)` when it lands, whichever way it lands — one pair per
+--- request, so a listener can refcount. Set by `completion.setup`, which
+--- points it at the fetch indicator.
+--- @type fun(conn_id: any, started: boolean)|nil
+M.on_fetch = nil
+
+--- Report a fetch starting or landing to `on_fetch`, when set.
+--- @param conn_id any
+--- @param started boolean
+local function report(conn_id, started)
+  if M.on_fetch then M.on_fetch(conn_id, started) end
+end
+
 --- Return the table key for `path` under `conn_id`.
 --- @param path string[]
 --- @return string
@@ -58,11 +72,13 @@ function M.children(conn_id, path, on_ready)
     return nil
   end
   waiting[key] = on_ready and { on_ready } or {}
+  report(conn_id, true)
 
   client.request("explore.list", { connection_id = conn_id, path = path }, function(err, result)
     vim.schedule(function()
       local callbacks = waiting[key] or {}
       waiting[key] = nil
+      report(conn_id, false)
       if err then return end
       local list = (result and result.items) or {}
       bucket(items, conn_id)[key] = list
