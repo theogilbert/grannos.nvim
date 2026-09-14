@@ -26,6 +26,8 @@ local KINDS = {
   r = "Reference", -- relationship type
   p = "Property",  -- property
   v = "Variable",  -- Cypher variable
+  m = "Struct",    -- metric
+  j = "Module",    -- scrape job
 }
 
 --- Convert one omnifunc-shaped candidate into a cmp item.
@@ -58,9 +60,9 @@ function source:get_debug_name()
   return M.NAME
 end
 
---- Punctuation that must trigger a request: after `alias.` or `(n:` there is
---- no word character for cmp's own keyword matching to fire on, and those are
---- exactly the positions where the list is most wanted.
+--- Punctuation that must trigger a request: after `alias.`, `(n:` or `up{`
+--- there is no word character for cmp's own keyword matching to fire on, and
+--- those are exactly the positions where the list is most wanted.
 --- @return string[]
 function source:get_trigger_characters()
   return completion.trigger_characters()

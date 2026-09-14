@@ -1,5 +1,6 @@
 --- Context-aware completion for query buffers, per language: table and
---- column names in SQL, labels, relationship types and properties in Cypher.
+--- column names in SQL, labels, relationship types and properties in Cypher,
+--- metrics, labels and jobs in PromQL.
 ---
 --- Exposed as 'omnifunc', so <C-x><C-o> works with no completion plugin
 --- installed and any engine that wraps omnifunc picks it up for free.
@@ -15,6 +16,9 @@
 ---   `prime(conn_id)`      listings worth fetching on attach
 ---   `at_cursor(bufnr, row, start_col, end_col)` → context or nil
 ---   `candidates(conn_id, ctx, add, on_ready)`   feed candidates to `add`
+---   `word_start(line, col)`                     optional: where the word ending
+---                                               at the cursor starts, when the
+---                                               language's words are not `[%w_]+`
 --- A buffer whose treesitter language is absent here has no completion.
 local cache  = require("grannos.completion.cache")
 local config = require("grannos.config")
@@ -25,6 +29,7 @@ local M = {}
 local LANGUAGES = {
   sql    = "grannos.completion.sql",
   cypher = "grannos.completion.cypher",
+  promql = "grannos.completion.promql",
 }
 
 --- bufnr → connection key, for buffers this module is attached to.
@@ -43,11 +48,14 @@ local function conn_id_for(bufnr)
 end
 
 --- Return the byte column where the word ending at the cursor starts.
---- Stops at "." so a qualified reference completes the part after the dot.
+--- Stops at "." so a qualified reference completes the part after the dot —
+--- unless `lang` draws its own word boundaries.
+--- @param lang table   language module
 --- @param line string
 --- @param col  integer  0-indexed byte column of the cursor
 --- @return integer
-local function word_start(line, col)
+local function word_start(lang, line, col)
+  if lang.word_start then return lang.word_start(line, col) end
   local start = col
   while start > 0 and line:sub(start, start):match("[%w_]") do
     start = start - 1
@@ -145,7 +153,7 @@ function M.candidates_at(bufnr, row, col, base, on_ready)
   local lang    = language_for(bufnr)
   if not conn_id or not lang then return {} end
   local line      = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1] or ""
-  local start_col = word_start(line, col)
+  local start_col = word_start(lang, line, col)
   local ctx       = lang.at_cursor(bufnr, row, start_col, col)
   if not ctx then return {} end
   return candidates(lang, conn_id, ctx, base or "", on_ready)
@@ -199,16 +207,16 @@ function M.omnifunc(findstart, base)
   row = row - 1
   local line = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1] or ""
 
-  if findstart == 1 then
-    if not conn_id_for(bufnr) then return -3 end  -- -3: cancel silently
-    return word_start(line, col)
-  end
-
   local conn_id = conn_id_for(bufnr)
   local lang    = language_for(bufnr)
+
+  if findstart == 1 then
+    if not conn_id or not lang then return -3 end  -- -3: cancel silently
+    return word_start(lang, line, col)
+  end
   if not conn_id or not lang then return {} end
 
-  local start_col = word_start(line, col)
+  local start_col = word_start(lang, line, col)
   local ctx = lang.at_cursor(bufnr, row, start_col, col)
   if not ctx then return {} end
 

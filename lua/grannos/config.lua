@@ -38,11 +38,12 @@ M.defaults = {
   },
 
   completion = {
-    -- Set 'omnifunc' on connected SQL and Cypher buffers, so <C-x><C-o>
-    -- completes table and column names — or labels, relationship types and
-    -- properties. Only `explore.list` is ever sent, and the server caches
-    -- each listing permanently, so a database sees one catalog query per
-    -- schema/table (or label) touched and nothing thereafter.
+    -- Set 'omnifunc' on connected SQL, Cypher and PromQL buffers, so
+    -- <C-x><C-o> completes table and column names — or labels, relationship
+    -- types and properties — or metrics, labels and jobs. Only `explore.list`
+    -- is ever sent, and the server caches each listing permanently, so a
+    -- database sees one catalog query per schema/table (or label, or metric)
+    -- touched and nothing thereafter.
     enabled = true,
 
     -- Upper bound on schemas swept to offer *unqualified* table names. A

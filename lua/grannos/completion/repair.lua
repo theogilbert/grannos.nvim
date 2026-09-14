@@ -27,6 +27,21 @@ function M.repaired(bufnr, row, start_col, end_col)
   return table.concat(lines, "\n"), start_col
 end
 
+--- Return the deepest named node at (`row`, `col`) once `text` is parsed as
+--- `lang`, or nil when it cannot be parsed.
+--- @param text string
+--- @param lang string   treesitter language
+--- @param row  integer  0-indexed
+--- @param col  integer  0-indexed byte column
+--- @return userdata|nil
+function M.node_at(text, lang, row, col)
+  local ok, parser = pcall(vim.treesitter.get_string_parser, text, lang)
+  if not ok or not parser then return nil end
+  local tree = parser:parse()[1]
+  if not tree then return nil end
+  return tree:root():named_descendant_for_range(row, col, row, col)
+end
+
 --- Parse the repaired buffer as `lang` and return the deepest named node at
 --- the placeholder, along with the repaired text it was parsed from. The text
 --- is what node text must be read against — never the buffer, whose word at
@@ -39,11 +54,46 @@ end
 --- @return userdata|nil, string
 function M.placeholder_node(bufnr, lang, row, start_col, end_col)
   local text, col = M.repaired(bufnr, row, start_col, end_col)
-  local ok, parser = pcall(vim.treesitter.get_string_parser, text, lang)
-  if not ok or not parser then return nil, text end
-  local tree = parser:parse()[1]
-  if not tree then return nil, text end
-  return tree:root():named_descendant_for_range(row, col, row, col), text
+  return M.node_at(text, lang, row, col), text
+end
+
+--- What each opening bracket is closed with, for `close_open`.
+local CLOSERS = { ["("] = ")", ["{"] = "}", ["["] = "]" }
+
+--- Return `text` with every string and bracket still open at its end closed.
+---
+--- The placeholder alone repairs a half-typed *word*; it does nothing for a
+--- half-typed *construct*, and mid-keystroke the closer usually isn't there
+--- yet. A grammar recovers far less from the ragged end of one: `up{grannos_ph_`
+--- parses as a stray error with no selector around it, where `up{grannos_ph_}`
+--- keeps the label under its metric. So what is open gets closed, innermost
+--- first. Only what is *still* open counts — a cursor mid-way through a
+--- finished query adds nothing — and brackets inside a string or a comment do
+--- not count, which is why the language's line-comment token is needed.
+--- @param text    string
+--- @param comment string  line-comment token, e.g. "#" or "--"
+--- @return string
+function M.close_open(text, comment)
+  local stack, quote, i = {}, nil, 1
+  while i <= #text do
+    local ch = text:sub(i, i)
+    if quote then
+      if ch == "\\" and quote ~= "`" then i = i + 1
+      elseif ch == quote then quote = nil end
+    elseif ch == '"' or ch == "'" or ch == "`" then
+      quote = ch
+    elseif text:sub(i, i + #comment - 1) == comment then
+      i = (text:find("\n", i, true) or #text + 1) - 1
+    elseif CLOSERS[ch] then
+      stack[#stack + 1] = CLOSERS[ch]
+    elseif stack[#stack] == ch then
+      stack[#stack] = nil
+    end
+    i = i + 1
+  end
+  local out = { text, quote or "" }
+  for j = #stack, 1, -1 do out[#out + 1] = stack[j] end
+  return table.concat(out)
 end
 
 --- Return the index of the placeholder among `parts`, or nil.

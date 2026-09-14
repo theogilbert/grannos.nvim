@@ -427,8 +427,8 @@ KEYMAPS ~
 ================================================================================
 COMPLETION                                                *grannos-completion*
 
-A SQL or Cypher buffer associated with a connection gets 'omnifunc' set, so
-|i_CTRL-X_CTRL-O| completes database names in place. No completion plugin is
+A SQL, Cypher or PromQL buffer associated with a connection gets 'omnifunc'
+set, so |i_CTRL-X_CTRL-O| completes database names in place. No completion plugin is
 required; any engine that wraps 'omnifunc' picks this up automatically.
 
 What is offered depends on where the cursor sits. In SQL:
@@ -468,6 +468,32 @@ In Cypher (Neo4j):
           RETURN, WHERE, WITH, SET, DELETE, …: the variables the statement
           binds, each annotated with its label or relationship type.
 
+In PromQL (Prometheus):
+
+  anywhere a selector can start
+          Metric names: an empty buffer, a call's argument, an operand.
+          Colons are part of the word, so a recording rule name
+          (`node:cpu:rate5m`) completes whole.
+
+  inside a selector's `{...}`
+          The labels of that selector's metric, annotated with it. The
+          closing brace need not be typed yet.
+
+  inside a `by`, `without`, `on`, `ignoring`, `group_left` or
+  `group_right` list
+          The labels of every metric in the expression the list modifies:
+          `sum by (…) (a / b)` and `a / on (…) b` offer both `a`'s and
+          `b`'s. A list typed before its expression (`sum by (`) has no
+          metric to draw on and offers nothing; so does a bare `{...}`
+          selector, since Prometheus has no per-label-name listing that
+          the tree exposes.
+
+  as the value of a `job` matcher
+          Scrape job names, from the `jobs` group of the explorer. The
+          whole string typed so far is the prefix, so `job="node-ex`
+          completes to `node-exporter` rather than matching nothing past
+          the hyphen.
+
 Candidates are filtered by what has been typed, case-insensitively.
 
 AS YOU TYPE (nvim-cmp) ~                              *grannos-completion-cmp*
@@ -479,7 +505,7 @@ native nvim-cmp source named `grannos`: >lua
   })
 <
 Or, to keep it to query buffers alone: >lua
-  require("cmp").setup.filetype({ "sql", "cypher" }, {
+  require("cmp").setup.filetype({ "sql", "cypher", "promql" }, {
     sources = { { name = "grannos" }, { name = "buffer" } },
   })
 <
@@ -489,9 +515,9 @@ config instead: >lua
   require("grannos.completion.cmp").setup()
 <
 The source is only active in a buffer that has a connection, and it triggers
-on "." and ":" as well as on word characters — after `alias.` or `(n:` there
-is no word for cmp to fire on, and those are where the column or label list
-matters most. Filtering is left to cmp, so its own sorting and fuzzy matching
+on ".", ":", "{", "(", "," and `"` as well as on word characters — after
+`alias.`, `(n:` or `up{` there is no word for cmp to fire on, and those are
+where the column or label list matters most. Filtering is left to cmp, so its own sorting and fuzzy matching
 apply.
 
 Prefer a native source over `cmp-omni`: 'omnifunc' refreshes its own popup when
@@ -506,11 +532,17 @@ IMPACT ON THE DATABASE ~
 Completion only ever sends `explore.list`, never `explore.describe`: it reads
 the catalog and never user table data. Each listing is fetched once and cached
 by the server permanently, so a database sees one catalog query per schema or
-table (or label) actually completed against, and nothing at all thereafter —
+table (or label, or metric) actually completed against, and nothing at all
+thereafter —
 a whole session of editing typically costs a handful of queries in total.
 
 Nothing blocks on the network. A lookup that has not been fetched yet returns
-what is already known and fills the popup in as the answer arrives.
+what is already known and fills the popup in as the answer arrives. While
+any listing is on its way, the cursor line shows a spinner and "fetching
+completions" as end-of-line virtual text (highlight group
+`GrannosCompletionFetch`, linked to |hl-Comment| by default), so an empty or
+partial popup is never mistaken for "nothing to offer". It disappears when
+the last listing lands.
 
 Set |grannos-completion-enabled| to false to turn this off.
 
@@ -717,10 +749,10 @@ connections_file ~
 completion.enabled ~
   Type: `boolean`   Default: `true`
 
-  Set 'omnifunc' on SQL and Cypher buffers that have a connection, so
-  |i_CTRL-X_CTRL-O| completes table and column names, or labels,
-  relationship types and properties. See |grannos-completion|. Set to false
-  to leave 'omnifunc' alone.
+  Set 'omnifunc' on SQL, Cypher and PromQL buffers that have a connection,
+  so |i_CTRL-X_CTRL-O| completes table and column names, labels,
+  relationship types and properties, or metrics, labels and jobs. See
+  |grannos-completion|. Set to false to leave 'omnifunc' alone.
 
                                       *grannos-completion-max_schema_scan*
 completion.max_schema_scan ~

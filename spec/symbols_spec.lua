@@ -241,6 +241,27 @@ describe("symbols.at_cursor for PromQL", function()
       promql_at('sum by (instance) (up)', "instance"))
   end)
 
+  it("scopes a grouping list to every metric of the expression it modifies", function()
+    assert.same(
+      { { name = "a", type = "metric" }, { name = "b", type = "metric" } },
+      promql_at('sum by (instance) (a / b)', "instance").scope)
+    assert.same(
+      { { name = "a", type = "metric" }, { name = "b", type = "metric" } },
+      promql_at('a / on (instance) b', "instance").scope)
+  end)
+
+  it("scopes a grouping list to its own aggregation, not a neighbouring one", function()
+    assert.same(
+      { { name = "b", type = "metric" } },
+      promql_at('sum(a) by (job) / sum(b) by (instance)', "instance").scope)
+  end)
+
+  it("leaves a label in a bare selector unscoped, whatever else the query names", function()
+    assert.same(
+      { name = "instance", type = "label", scope = {} },
+      promql_at('a + {instance="x"}', "instance"))
+  end)
+
   it("names the scrape job a job matcher selects", function()
     assert.same(
       { name = "api", type = "job", scope = {} },
