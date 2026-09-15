@@ -20,10 +20,11 @@ local SCOPE_STOP = { ERROR = true, source_file = true }
 --- belongs to every metric of the expression the list modifies, which is the
 --- nearest enclosing one that names any: `explore.find` treats scopes of one
 --- type as alternatives, so `sum by (job) (a + b)` may resolve under either.
---- @param node  userdata  the label's identifier node
+--- Public because completion scopes a matcher's *value* the same way.
+--- @param node  userdata  the label's identifier node, or a matcher's value
 --- @param bufnr integer|string  buffer, or the text the node was parsed from
 --- @return SearchScope[]
-local function metric_scope(node, bufnr)
+function M.metric_scope(node, bufnr)
   local list = util.ancestor(node, { label_matchers = true, label_list_paren = true })
   if not list then return {} end
   local names = {}
@@ -73,7 +74,7 @@ function M.extract(node, bufnr)
     return {
       name  = util.text(node, bufnr),
       type  = "label",
-      scope = metric_scope(node, bufnr),
+      scope = M.metric_scope(node, bufnr),
     }
   end
 

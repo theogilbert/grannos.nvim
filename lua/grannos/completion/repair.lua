@@ -15,15 +15,23 @@ M.PLACEHOLDER = "grannos_ph_"
 
 --- Return `bufnr`'s text with [start_col, end_col) on `row` replaced by the
 --- placeholder, plus the byte column the placeholder starts at.
+---
+--- Rows outside [first_row, last_row] are left out when given, so a language
+--- whose queries are delimited by layout rather than a terminator can parse
+--- the cursor's query alone; `row` must then be counted from `first_row`.
 --- @param bufnr     integer
 --- @param row       integer  0-indexed
 --- @param start_col integer  0-indexed byte column
 --- @param end_col   integer  0-indexed byte column
+--- @param first_row integer|nil  0-indexed first row to include (default: the first)
+--- @param last_row  integer|nil  0-indexed last row to include (default: the last)
 --- @return string, integer
-function M.repaired(bufnr, row, start_col, end_col)
-  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  local line  = lines[row + 1] or ""
-  lines[row + 1] = line:sub(1, start_col) .. M.PLACEHOLDER .. line:sub(end_col + 1)
+function M.repaired(bufnr, row, start_col, end_col, first_row, last_row)
+  first_row = first_row or 0
+  local lines = vim.api.nvim_buf_get_lines(bufnr, first_row, last_row and last_row + 1 or -1, false)
+  local i     = row - first_row + 1
+  local line  = lines[i] or ""
+  lines[i] = line:sub(1, start_col) .. M.PLACEHOLDER .. line:sub(end_col + 1)
   return table.concat(lines, "\n"), start_col
 end
 

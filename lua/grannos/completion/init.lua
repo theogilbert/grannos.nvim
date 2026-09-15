@@ -79,10 +79,11 @@ end
 --- @param word string
 --- @param kind string    single-letter 'kind' column in the popup
 --- @param menu string    right-hand annotation
-local function add(out, seen, base, word, kind, menu)
+--- @param info string|nil documentation, for the preview a built-in carries
+local function add(out, seen, base, word, kind, menu, info)
   if word == nil or word == "" or seen[word] or not matches(word, base) then return end
   seen[word] = true
-  out[#out + 1] = { word = word, kind = kind, menu = menu }
+  out[#out + 1] = { word = word, kind = kind, menu = menu, info = info }
 end
 
 --- Build the candidate list for `ctx`, starting any fetch it needs.
@@ -94,8 +95,8 @@ end
 --- @return table[]
 local function candidates(lang, conn_id, ctx, base, on_ready)
   local out, seen = {}, {}
-  lang.candidates(conn_id, ctx, function(word, kind, menu)
-    add(out, seen, base, word, kind, menu)
+  lang.candidates(conn_id, ctx, function(word, kind, menu, info)
+    add(out, seen, base, word, kind, menu, info)
   end, on_ready)
   table.sort(out, function(a, b) return a.word:lower() < b.word:lower() end)
   return out
@@ -147,7 +148,7 @@ end
 --- @param col      integer       0-indexed byte column of the cursor
 --- @param base     string|nil    typed prefix to filter by; "" or nil for all
 --- @param on_ready fun()|nil     called when a listing this position needed arrives
---- @return table[]  { word, kind, menu } entries
+--- @return table[]  { word, kind, menu, info } entries
 function M.candidates_at(bufnr, row, col, base, on_ready)
   local conn_id = conn_id_for(bufnr)
   local lang    = language_for(bufnr)

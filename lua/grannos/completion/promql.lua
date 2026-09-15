@@ -1,8 +1,9 @@
---- Candidates for PromQL buffers: metric names wherever a selector can start,
---- label names inside a selector's braces and in a `by`, `without`, `on`,
---- `ignoring`, `group_left` or `group_right` list, and scrape job names as the
---- value of a `job` matcher. See `grannos.completion` for the language-module
---- contract.
+--- Candidates for PromQL buffers: metric names, functions and aggregation
+--- operators wherever an expression can start, label names inside a
+--- selector's braces and in a `by`, `without`, `on`, `ignoring`, `group_left`
+--- or `group_right` list, and a matcher's value: the label's values for the
+--- selector's metric, or scrape job names for a `job` matcher with no metric
+--- to scope it. See `grannos.completion` for the language-module contract.
 ---
 --- The repaired buffer is parsed with the promql treesitter grammar and the
 --- placeholder's node handed to `grannos.symbols.promql` — the same walk that
@@ -11,9 +12,10 @@
 --- open is closed before parsing: a selector is completed inside braces that
 --- are not closed yet far more often than not, and the grammar only keeps a
 --- label under its metric when they are.
-local cache   = require("grannos.completion.cache")
-local repair  = require("grannos.completion.repair")
-local symbols = require("grannos.symbols.promql")
+local builtins = require("grannos.builtins")
+local cache    = require("grannos.completion.cache")
+local repair   = require("grannos.completion.repair")
+local symbols  = require("grannos.symbols.promql")
 
 local M = {}
 
@@ -26,8 +28,8 @@ M.TRIGGER_CHARACTERS = { "{", "(", ",", '"' }
 local COMMENT = "#"
 
 --- Explore-tree groups. A Prometheus tree is fixed — `metrics` → metric →
---- label, `jobs` → job — so the names are assumed rather than discovered, as
---- `cache.columns` assumes "columns" for SQL.
+--- label → value, `jobs` → job — so the names are assumed rather than
+--- discovered, as `cache.columns` assumes "columns" for SQL.
 local METRICS = "metrics"
 local JOBS    = "jobs"
 
@@ -83,9 +85,53 @@ function M.word_start(line, col)
   return start
 end
 
+--- Return the first and last row of the query `row` is in: PromQL has no
+--- statement terminator, so a query is the block of lines between blank
+--- (whitespace-only) lines, as the grammar's separator defines it.
+--- @param bufnr integer
+--- @param row   integer  0-indexed
+--- @return integer, integer  0-indexed, inclusive
+local function query_rows(bufnr, row)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local first, last = row, row
+  while first > 0 and lines[first]:match("%S") do first = first - 1 end
+  while last < #lines - 1 and lines[last + 2]:match("%S") do last = last + 1 end
+  return first, last
+end
+
+--- Built-in functions and aggregation operators as candidates, laid out once:
+--- the list is static and every metric position offers it.
+local BUILTIN_ITEMS = nil
+
+--- @return { word: string, kind: string, menu: string, info: string }[]
+local function builtin_items()
+  if not BUILTIN_ITEMS then
+    BUILTIN_ITEMS = {}
+    for _, b in ipairs(builtins.all("promql")) do
+      BUILTIN_ITEMS[#BUILTIN_ITEMS + 1] = {
+        word = b.name,
+        kind = b.kind == "function" and "f" or "o",
+        menu = b.kind,
+        info = table.concat((builtins.hover_lines(b)), "\n"),
+      }
+    end
+  end
+  return BUILTIN_ITEMS
+end
+
 --- @class PromqlCompletionContext
---- @field kind    "metric"|"label"|"job"
---- @field metrics string[]|nil  label kind: the metrics whose labels apply; empty when none is known
+--- @field kind    "metric"|"label"|"label_value"|"job"   metric: anywhere an expression starts, built-ins included
+--- @field metrics string[]|nil  label and label_value kinds: the metrics in scope; empty when none is known
+--- @field label   string|nil    label_value kind: the label whose value is typed
+
+--- Return the names of `scopes`.
+--- @param scopes SearchScope[]
+--- @return string[]
+local function names(scopes)
+  local out = {}
+  for _, scope in ipairs(scopes) do out[#out + 1] = scope.name end
+  return out
+end
 
 --- Describe what should be completed at [start_col, end_col) on `row`.
 --- Returns nil when the position names nothing the server can answer.
@@ -95,19 +141,32 @@ end
 --- @param end_col   integer  0-indexed byte column of the cursor
 --- @return PromqlCompletionContext|nil
 function M.at_cursor(bufnr, row, start_col, end_col)
-  local text, col = repair.repaired(bufnr, row, start_col, end_col)
+  -- The cursor's query alone: a closer appended past its end would land in
+  -- the next query rather than close this one.
+  local first, last = query_rows(bufnr, row)
+  local text, col = repair.repaired(bufnr, row, start_col, end_col, first, last)
   text = repair.close_open(text, COMMENT)
-  local node = repair.node_at(text, "promql", row, col)
+  local node = repair.node_at(text, "promql", row - first, col)
   if not node then return nil end
+
+  -- A matcher's value. The tree lists a label's values under its metric, so
+  -- with one in scope those are offered whatever the label; the `jobs` group
+  -- — every scrape job — is the fallback for a `job` matcher with none.
+  local parent = node:parent()
+  if node:type() == "string_literal" and parent and parent:type() == "label_matcher" then
+    local name_node = parent:field("name")[1]
+    local label     = name_node and vim.treesitter.get_node_text(name_node, text)
+    if not label then return nil end
+    local metrics = names(symbols.metric_scope(node, text))
+    if #metrics > 0 then return { kind = "label_value", label = label, metrics = metrics } end
+    local sym = symbols.extract(node, text)
+    return sym and sym.type == "job" and { kind = "job" } or nil
+  end
 
   local sym = symbols.extract(node, text)
   if not sym then return nil end
   if sym.type == "metric" then return { kind = "metric" } end
-  if sym.type == "job" then return { kind = "job" } end
-
-  local metrics = {}
-  for _, scope in ipairs(sym.scope) do metrics[#metrics + 1] = scope.name end
-  return { kind = "label", metrics = metrics }
+  return { kind = "label", metrics = names(sym.scope) }
 end
 
 --- Feed the candidates for `ctx` to `add`, starting any fetch it needs.
@@ -118,16 +177,25 @@ end
 --- tree exposes, and sweeping metrics for one is unbounded.
 --- @param conn_id  any
 --- @param ctx      PromqlCompletionContext
---- @param add      fun(word: string, kind: string, menu: string)
+--- @param add      fun(word: string, kind: string, menu: string, info: string|nil)
 --- @param on_ready fun()|nil  called once per fetch that completes
 function M.candidates(conn_id, ctx, add, on_ready)
   if ctx.kind == "metric" then
     for _, item in ipairs(cache.children(conn_id, { METRICS }, on_ready) or {}) do
       add(item.name, "m", item.type)
     end
+    -- A function or aggregation is written where a metric is, and its
+    -- documentation rides along as the popup's preview.
+    for _, b in ipairs(builtin_items()) do add(b.word, b.kind, b.menu, b.info) end
   elseif ctx.kind == "job" then
     for _, item in ipairs(cache.children(conn_id, { JOBS }, on_ready) or {}) do
       add(item.name, "j", item.type)
+    end
+  elseif ctx.kind == "label_value" then
+    for _, metric in ipairs(ctx.metrics) do
+      for _, item in ipairs(cache.children(conn_id, { METRICS, metric, ctx.label }, on_ready) or {}) do
+        add(item.name, "e", ctx.label)
+      end
     end
   else
     for _, metric in ipairs(ctx.metrics) do

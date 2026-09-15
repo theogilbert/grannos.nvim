@@ -28,6 +28,9 @@ local KINDS = {
   v = "Variable",  -- Cypher variable
   m = "Struct",    -- metric
   j = "Module",    -- scrape job
+  e = "EnumMember",-- label value
+  f = "Function",  -- built-in function
+  o = "Operator",  -- aggregation operator
 }
 
 --- Convert one omnifunc-shaped candidate into a cmp item.
@@ -35,15 +38,16 @@ local KINDS = {
 --- The type/owner annotation goes in `labelDetails.description`, which is what
 --- cmp renders in the menu column; `detail` alone would only ever reach the
 --- documentation window.
---- @param item table  { word, kind, menu }
+--- @param item table  { word, kind, menu, info }
 --- @return table
 local function cmp_item(item)
   local lsp = require("cmp.types").lsp
   return {
-    label        = item.word,
-    kind         = lsp.CompletionItemKind[KINDS[item.kind] or "Text"],
-    labelDetails = { description = item.menu },
-    detail       = item.menu,
+    label         = item.word,
+    kind          = lsp.CompletionItemKind[KINDS[item.kind] or "Text"],
+    labelDetails  = { description = item.menu },
+    detail        = item.menu,
+    documentation = item.info,
   }
 end
 

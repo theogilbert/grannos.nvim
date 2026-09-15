@@ -268,6 +268,17 @@ describe("symbols.at_cursor for PromQL", function()
       promql_at('http_requests_total{job="api"}', '"api"'))
   end)
 
+  it("resolves inside a buffer holding several blank-line-separated queries", function()
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "up", "", 'http_requests_total{job="api", code="500"}' })
+    vim.bo[buf].filetype = "promql"
+    vim.api.nvim_win_set_buf(0, buf)
+    vim.api.nvim_win_set_cursor(0, { 3, 32 })
+    assert.same(
+      { name = "code", type = "label", scope = { { name = "http_requests_total", type = "metric" } } },
+      symbols.at_cursor(buf))
+  end)
+
   it("returns nil for an ordinary label value", function()
     assert.is_nil(promql_at('http_requests_total{code="500"}', '"500"'))
   end)

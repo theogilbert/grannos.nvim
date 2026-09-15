@@ -15,6 +15,7 @@ local symbols           = require("grannos.symbols")
 local log               = require("grannos.log")
 local session_params    = require("grannos.session_params")
 local hover             = require("grannos.ui.hover")
+local builtins          = require("grannos.builtins")
 local symbol_busy       = require("grannos.ui.symbol_busy")
 
 local FLASH_NS = vim.api.nvim_create_namespace("GrannosFlash")
@@ -808,7 +809,17 @@ end
 --- info for the surrounding statement has its own key (M.show_query_info),
 --- reachable from every column of the statement including this one.
 function M.describe_symbol_at_cursor()
-  local bufnr    = vim.api.nvim_get_current_buf()
+  local bufnr = vim.api.nvim_get_current_buf()
+
+  -- A built-in function needs no connection to be described: its docstring
+  -- comes from the language, not the database.
+  local builtin = builtins.at_cursor(bufnr)
+  if builtin then
+    local lines, hls = builtins.hover_lines(builtin)
+    hover.open(lines, bufnr, { hls = hls })
+    return
+  end
+
   local conn_key = state.buf_conns[bufnr]
   if not conn_key then return end
 

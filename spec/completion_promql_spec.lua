@@ -3,7 +3,7 @@
 local requests = {}
 
 --- Canned explore.list responses, keyed by NUL-joined path, in the shape the
---- Prometheus driver lists: metrics → metric → labels, jobs → job.
+--- Prometheus driver lists: metrics → metric → label → values, jobs → job.
 local TREE = {
   [""]                             = { { name = "metrics",       type = "group",         expandable = true },
                                        { name = "jobs",          type = "group",         expandable = true },
@@ -20,6 +20,11 @@ local TREE = {
   ["metrics\0up"]                  = { { name = "instance", type = "label" },
                                        { name = "job",      type = "label" } },
   ["metrics\0node:cpu:rate5m"]     = { { name = "instance", type = "label" } },
+  ["metrics\0http_requests_total\0code"] = { { name = "200", type = "label_value" },
+                                              { name = "500", type = "label_value" } },
+  ["metrics\0up\0job"]             = { { name = "api", type = "label_value" } },
+  ["metrics\0up\0instance"]        = { { name = "api-1:9090", type = "label_value" },
+                                       { name = "api-2:9090", type = "label_value" } },
 }
 
 package.loaded["grannos.client"] = {
@@ -180,6 +185,13 @@ describe("completion.promql.at_cursor", function()
     assert.same({ "up" }, classify({ "up{", "  |", "}" }).metrics)
   end)
 
+  it("parses the cursor's query alone in a buffer holding several", function()
+    assert.same({ "up" }, classify({ "rate(http_requests_total[5m])", "", "up{|" }).metrics)
+    assert.same({ "up" }, classify({ "up{|", "", "rate(http_requests_total[5m])" }).metrics)
+    assert.same({ "up" }, classify({ "# two queries", "sum(", "  up{|", "", "absent(x)" }).metrics)
+    assert.equals("metric", classify({ "up", "", "rate(|" }).kind)
+  end)
+
   it("leaves a label in a bare selector unscoped", function()
     local ctx = classify({ "{|}" })
     assert.equals("label", ctx.kind)
@@ -205,15 +217,23 @@ describe("completion.promql.at_cursor", function()
     assert.same({}, ctx.metrics)
   end)
 
-  it("classifies the value of a job matcher, closed or not", function()
-    assert.equals("job", classify({ 'up{job="|"}' }).kind)
-    assert.equals("job", classify({ 'up{job="|' }).kind)
-    assert.equals("job", classify({ 'up{job=~"|"}' }).kind)
-    assert.equals("job", classify({ 'up{job="node-ex|' }).kind)
+  it("classifies a matcher's value by its label and metric, closed or not", function()
+    local ctx = classify({ 'http_requests_total{code="|"}' })
+    assert.equals("label_value", ctx.kind)
+    assert.equals("code", ctx.label)
+    assert.same({ "http_requests_total" }, ctx.metrics)
+    assert.same({ "up" }, classify({ 'up{job="|' }).metrics)
+    assert.equals("job", classify({ 'up{job=~"|"}' }).label)
+    assert.equals("instance", classify({ 'up{instance="api-|' }).label)
   end)
 
-  it("returns nil for any other string", function()
-    assert.is_nil(classify({ 'up{code="|"}' }))
+  it("classifies a job matcher with no metric as a scrape-job position", function()
+    assert.equals("job", classify({ '{job="|"}' }).kind)
+    assert.equals("job", classify({ '{job="node-ex|' }).kind)
+  end)
+
+  it("returns nil for a string that is no matcher value, or an unscoped non-job matcher", function()
+    assert.is_nil(classify({ '{code="|"}' }))
     assert.is_nil(classify({ 'label_replace(up, "|", "", "", "")' }))
   end)
 end)
@@ -225,15 +245,49 @@ describe("completion.omnifunc in a PromQL buffer", function()
     requests = {}
   end)
 
+  --- The candidates of `kind` among `items`.
+  --- @param items table[]
+  --- @param kind  string
+  --- @return table[]
+  local function of_kind(items, kind)
+    return vim.tbl_filter(function(i) return i.kind == kind end, items)
+  end
+
   it("offers metrics in an empty buffer, annotated as such", function()
-    local items = complete_items({ "|" })
+    local items = of_kind(complete_items({ "|" }), "m")
     assert.same({ { word = "http_requests_total", kind = "m", menu = "metric" },
                   { word = "node:cpu:rate5m",     kind = "m", menu = "metric" },
                   { word = "up",                  kind = "m", menu = "metric" } }, items)
   end)
 
   it("offers metrics inside a call", function()
-    assert.same({ "http_requests_total", "node:cpu:rate5m", "up" }, complete({ "rate(|" }))
+    local words = {}
+    for _, i in ipairs(of_kind(complete_items({ "rate(|" }), "m")) do words[#words + 1] = i.word end
+    assert.same({ "http_requests_total", "node:cpu:rate5m", "up" }, words)
+  end)
+
+  it("offers built-in functions and aggregation operators where a metric goes, with their docstring", function()
+    local items = complete_items({ "sum(|" })
+    local by_word = {}
+    for _, i in ipairs(items) do by_word[i.word] = i end
+    assert.equals("f", by_word.rate.kind)
+    assert.equals("function", by_word.rate.menu)
+    assert.is_truthy(by_word.rate.info:find("^rate%(v range%-vector%)\n\nCalculates the per%-second"))
+    assert.equals("o", by_word.topk.kind)
+    assert.equals("aggregation", by_word.topk.menu)
+    assert.is_truthy(by_word.topk.info:find("topk [without|by (<label list>)]", 1, true))
+    assert.is_truthy(by_word.limitk.info:find("experimental", 1, true))
+  end)
+
+  it("filters built-ins by the typed prefix alongside metrics", function()
+    assert.same({ "histogram_avg", "histogram_count", "histogram_fraction", "histogram_quantile",
+                  "histogram_quantiles", "histogram_stddev", "histogram_stdvar", "histogram_sum",
+                  "hour", "http_requests_total" }, complete({ "h|" }))
+  end)
+
+  it("offers no built-in inside a selector's braces or a grouping list", function()
+    assert.same({}, of_kind(complete_items({ "up{|" }), "f"))
+    assert.same({}, of_kind(complete_items({ "sum by (|) (up)" }), "f"))
   end)
 
   it("filters metrics by the typed prefix, colons included", function()
@@ -246,6 +300,11 @@ describe("completion.omnifunc in a PromQL buffer", function()
                   { word = "job",      kind = "l", menu = "up" } }, items)
   end)
 
+  it("completes the query under the cursor when the buffer holds several", function()
+    assert.same({ "instance", "job" }, complete({ "rate(http_requests_total[5m])", "", "up{|" }))
+    assert.same({ "code", "instance", "job", "method" }, complete({ "http_requests_total{|", "", "up" }))
+  end)
+
   it("offers labels in a selector whose braces are not closed yet", function()
     assert.same({ "code", "instance", "job", "method" }, complete({ 'http_requests_total{job="api", |' }))
   end)
@@ -254,14 +313,23 @@ describe("completion.omnifunc in a PromQL buffer", function()
     assert.same({ "code", "instance", "job", "method" }, complete({ "sum by (|) (http_requests_total / up)" }))
   end)
 
-  it("offers jobs as the value of a job matcher", function()
-    local items = complete_items({ 'up{job="|"}' })
-    assert.same({ { word = "api",           kind = "j", menu = "job" },
-                  { word = "node-exporter", kind = "j", menu = "job" } }, items)
+  it("offers a label's values for the selector's metric, annotated with the label", function()
+    local items = complete_items({ 'http_requests_total{code="|"}' })
+    assert.same({ { word = "200", kind = "e", menu = "code" },
+                  { word = "500", kind = "e", menu = "code" } }, items)
+    assert.same({ "api" }, complete({ 'up{job="|' }))
   end)
 
-  it("completes a hyphenated job from the whole string typed so far", function()
-    assert.same({ "node-exporter" }, complete({ 'up{job="node-ex|' }))
+  it("completes a hyphenated value from the whole string typed so far", function()
+    assert.same({ "api-1:9090", "api-2:9090" }, complete({ 'up{instance="api-|' }))
+    assert.same({ "api-2:9090" }, complete({ 'up{instance="api-2|"}' }))
+  end)
+
+  it("offers every scrape job as the value of a job matcher with no metric", function()
+    local items = complete_items({ '{job="|"}' })
+    assert.same({ { word = "api",           kind = "j", menu = "job" },
+                  { word = "node-exporter", kind = "j", menu = "job" } }, items)
+    assert.same({ "node-exporter" }, complete({ '{job="node-ex|' }))
   end)
 
   it("offers nothing for a label with no metric in scope", function()
@@ -269,8 +337,9 @@ describe("completion.omnifunc in a PromQL buffer", function()
     assert.same({}, complete({ "sum by (|" }))
   end)
 
-  it("offers nothing inside a string that is not a job value", function()
-    assert.same({}, complete({ 'up{code="|"}' }))
+  it("offers nothing for a matcher value with neither metric nor job to draw on", function()
+    assert.same({}, complete({ '{code="|"}' }))
+    assert.same({}, complete({ 'label_replace(up, "|", "", "", "")' }))
   end)
 
   it("primes the metric and job listings on attach, once", function()
@@ -282,14 +351,15 @@ describe("completion.omnifunc in a PromQL buffer", function()
   it("sends one explore.list per path and never repeats one", function()
     complete({ "up{|}" })
     complete({ "up{|}" })
-    assert.same({ "metrics", "jobs", "metrics\0up" }, requests)
+    complete({ 'up{job="|"}' })
+    assert.same({ "metrics", "jobs", "metrics\0up", "metrics\0up\0job" }, requests)
   end)
 
   it("never sends explore.describe — it samples label values", function()
     complete({ 'http_requests_total{job="|"}' })
     complete({ "sum by (|) (http_requests_total / up)" })
     for _, key in ipairs(requests) do
-      assert.is_truthy(key == "metrics" or key == "jobs" or key:find("^metrics\0[^\0]+$"))
+      assert.is_truthy(key == "metrics" or key == "jobs" or key:find("^metrics\0[^\0]+\0?[^\0]*$"))
     end
   end)
 end)
