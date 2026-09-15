@@ -421,8 +421,45 @@ KEYMAPS ~
   S       Save the LOB cell under the cursor to a file on disk (prompted).
   [       Go to the previous page of results.
   ]       Go to the next page of results.
+  gh      Toggle the documents-over-time histogram, see |grannos-histogram|.
   q       Close the results window.
   g?      Show a keymap reference float.
+
+DOCUMENTS OVER TIME ~
+                                                    *grannos-histogram*
+
+On a driver that can bucket a query by time (Elasticsearch), `gh` in the
+results window charts how the documents the query matched spread over its
+time field — the same field, range and query the table came from:
+
+    1,204 returned  ·  48,911 matched  ·  0.312s
+                                                                        ~
+    documents over time  ·  @timestamp  ·  5m per bar  ·  peak 1,842
+    1,842 ┤        █
+          ┤        █   ▄                    ▂
+          ┤  ▂     █   █ ▅          ▃      ▄█
+          ┤ ▃█▅   ▇█  ▂█ █▂   ▁    ▅█▃   ▂▇██▃
+          ┤▁███▆▂▄██▆▅███████▄▇█▇▅▆████▇▆██████▇▄▂▁
+          └──────────────────────────────────────────
+          09:00        10:00        11:00        12:00
+                                                                        ~
+    │ @timestamp           │ level │ message              │
+
+Each bar is one column wide and one bucket long; the server picks a round
+interval (the "per bar" width) so that at most one bucket per column of the
+window is returned. The counts cover every matching document, not just the
+rows the table shows. Axis labels are in local time. |grannos-hover-key| on
+a bar shows the bucket's time span and exact count.
+
+The chart is off by default. `gh` turns it on for the current results
+buffer — it then stays on, re-fetched for each new result shown there, until
+`gh` turns it off again. It is fetched with a separate `execute.histogram`
+request after the result lands, so a query is never slowed down by a chart
+that is not showing. Not available in the batch view of a multi-statement
+run, or in Elasticsearch's Dev Tools query mode.
+
+The bars use `GrannosHistogramBar`; the chart's height is
+|grannos-histogram_height|.
 
 ================================================================================
 COMPLETION                                                *grannos-completion*
@@ -723,6 +760,7 @@ All keys are optional.
       page_size           = 500,
       thousands_separator = "_",
       decimal_separator   = ".",
+      histogram_height    = 6,
     },
     completion = {
       enabled         = true,
@@ -851,6 +889,13 @@ results.decimal_separator ~
   The thousands separator is highlighted slightly dimmer than the digits
   (`GrannosThousandsSeparator`); the decimal separator is always
   highlighted the same as the surrounding digits.
+
+                                                 *grannos-histogram_height*
+results.histogram_height ~
+  Type: `integer`   Default: `6`
+
+  Height in rows of the documents-over-time chart (|grannos-histogram|).
+  Bars are drawn in eighths of a row, so the default resolves 48 levels.
 
 ================================================================================
 SUPPORTED DATABASES                                          *grannos-drivers*

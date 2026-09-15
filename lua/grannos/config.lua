@@ -73,6 +73,10 @@ M.defaults = {
     -- Character used as the decimal point in numeric cells (e.g. "1234.56").
     -- Set to false or "" to display numbers with a literal "." decimal point.
     decimal_separator = ".",
+
+    -- Height, in rows, of the documents-over-time chart that `gh` toggles
+    -- above the table on drivers that support it (Elasticsearch).
+    histogram_height = 6,
   },
 }
 

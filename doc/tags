@@ -29,6 +29,8 @@ grannos-drivers	grannos.txt	/*grannos-drivers*
 grannos-explorer	grannos.txt	/*grannos-explorer*
 grannos-goto-symbol-key	grannos.txt	/*grannos-goto-symbol-key*
 grannos-health	grannos.txt	/*grannos-health*
+grannos-histogram	grannos.txt	/*grannos-histogram*
+grannos-histogram_height	grannos.txt	/*grannos-histogram_height*
 grannos-hover-key	grannos.txt	/*grannos-hover-key*
 grannos-intro	grannos.txt	/*grannos-intro*
 grannos-messages	grannos.txt	/*grannos-messages*

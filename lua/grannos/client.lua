@@ -22,7 +22,7 @@ local caps_pending = {}   -- callbacks waiting for the first fetch
 -- PROTOCOL_VERSION for breaking changes; bump minor for additive changes.
 -- Only major is checked for compatibility — a minor bump is guaranteed
 -- backward-compatible by convention.
-local PROTOCOL_VERSION = "1.0"
+local PROTOCOL_VERSION = "1.1"
 M.PROTOCOL_VERSION = PROTOCOL_VERSION
 
 

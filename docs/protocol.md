@@ -105,7 +105,7 @@ Only drivers whose dependencies are installed appear in the response.
   "id": 1,
   "result": {
     "server": "grannos",
-    "protocol_version": "1.0",
+    "protocol_version": "1.1",
     "drivers": [
       {
         "driver": "mydriver",
@@ -254,6 +254,45 @@ SQL `NULL`, a [LobPlaceholder](#lobplaceholder) object standing in for a large o
 (CLOB/BLOB/etc.) the server did not inline into the result set, or a
 [SpecialFloat](#specialfloat) object standing in for a non-finite float value (NaN, +Inf, -Inf)
 plain JSON cannot represent (e.g. from a Prometheus query like `1/0`).
+
+---
+
+### `execute.histogram`
+
+Counts the documents a query matches per time bucket — the data behind a "documents over time" chart for the same query [`execute`](#execute) would run. Only drivers whose [Driver](#driver) entry has `supports_histogram: true` answer it; any other rejects the call with an error.
+
+The query string is exactly what `execute` takes, and the driver applies the same session settings to it (Elasticsearch's `time_field`, `time_from`, `time_to`). Buckets are contiguous and ascending — an empty interval is present with a count of zero — so a client can draw them side by side without knowing the interval.
+
+**params**
+
+| Field           | Type               | Description                                                                 |
+|-----------------|--------------------|-----------------------------------------------------------------------------|
+| `connection_id` | string             | Connection to execute on                                                    |
+| `query`         | string             | The query, as it would be passed to `execute`                               |
+| `buckets`       | integer (optional) | Target number of buckets; default 50, capped at 500. The driver picks a round interval that yields about this many — typically one per column the client can draw — so the actual count may be lower. |
+
+**result**
+
+| Field         | Type                                         | Description                                                    |
+|---------------|----------------------------------------------|----------------------------------------------------------------|
+| `field`       | string                                       | The time field the documents were bucketed on                  |
+| `interval`    | string                                       | Width of every bucket as a short duration (`"5m"`, `"1h"`, `"1d"`); `""` when the driver could not tell |
+| `buckets`     | array of [HistogramBucket](#histogrambucket) | Ascending; empty when the query matched nothing                |
+| `duration_ms` | number                                       | Wall-clock execution time in milliseconds                      |
+
+**example**
+
+```json
+{"id":8,"method":"execute.histogram","params":{"connection_id":"0","query":"logs | level:error","buckets":60}}
+{"id":8,"result":{"field":"@timestamp","interval":"5m","buckets":[{"time":1704067200000,"count":4},{"time":1704067500000,"count":0},{"time":1704067800000,"count":7}],"duration_ms":18.2},"error":null}
+```
+
+#### HistogramBucket
+
+| Field   | Type    | Description                                                        |
+|---------|---------|--------------------------------------------------------------------|
+| `time`  | integer | Start of the bucket, as Unix milliseconds (UTC)                    |
+| `count` | integer | Documents whose time field falls in `[time, time + interval)`      |
 
 ---
 
@@ -593,6 +632,7 @@ Each entry in the `capabilities.drivers` array:
 | `session_params` | array of [DriverParam](#driverparam) | Runtime-only settings changeable on a live connection via [`session.set`](#sessionset)/[`session.get`](#sessionget) — never sent as part of `connect.params` and never persisted alongside a saved connection. Empty when the driver has no such settings. |
 | `supports_writes` | boolean                          | Whether this driver's query language can express write operations. `false` for a genuinely read-only driver (e.g. Prometheus/PromQL) — clients should hide write-related connection settings (e.g. "always allow writes") for such drivers. Defaults to `true`. |
 | `languages` | array of [Language](#language)    | Query languages this driver supports. Empty when the driver has no language affinity. |
+| `supports_histogram` | boolean                  | Whether this driver answers [`execute.histogram`](#executehistogram). Clients should offer a documents-over-time view only where it is `true`. Defaults to `false`. |
 
 ## Language
 

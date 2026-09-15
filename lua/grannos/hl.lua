@@ -18,7 +18,8 @@ local MSG_WARN_FG  = "#E5C07B"  -- amber, same as the gutter's running mark
 local SCROLLBAR_FG = "#888888"
 local BOOL_TRUE_FG  = "#98C379"  -- same green as GrannosQuerySuccess
 local BOOL_FALSE_FG = ERROR_FG
-local EDIT_BG      = "#1F3D2B"  -- subtle green, echoing the common insert-mode statusline color
+local EDIT_BG      = "#1F3D2B"
+local HISTOGRAM_FG = "#6FA8DC"  -- bars of the results pane's documents-over-time chart  -- subtle green, echoing the common insert-mode statusline color
 
 local DIAGRAM_ROOT_TABLE_FG = "#DAA520" -- gold, reserved for a diagram's source/root table
 
@@ -72,6 +73,7 @@ local function build_highlights()
     GrannosLob       = { fg = LOB_FG, italic = true },
     GrannosSpecialFloat = { fg = SPECIAL_FLOAT_FG, italic = true },
     GrannosHelp      = { fg = HELP_FG, italic = true },
+    GrannosHistogramBar = { fg = HISTOGRAM_FG },
     GrannosThousandsSeparator = { fg = THOUSANDS_FG },
     GrannosMessageInfo        = { fg = MSG_INFO_FG },
     GrannosMessageWarning     = { fg = MSG_WARN_FG },

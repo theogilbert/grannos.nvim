@@ -24,6 +24,7 @@ local content_buffer = require("grannos.ui.content_buffer")
 local hover          = require("grannos.ui.hover")
 local column_ui      = require("grannos.ui.column")
 local messages       = require("grannos.messages")
+local histogram      = require("grannos.ui.histogram")
 
 local M = {}
 
@@ -37,6 +38,9 @@ local render_table              -- forward declaration; defined after apply_high
 local export_results            -- forward declaration; defined after open_export_buffer
 local toggle_thousands_separator -- forward declaration; defined after rebuild_segments
 local segment_at_line           -- forward declaration; defined after render_segments
+local fetch_histogram           -- forward declaration; defined after render_table
+local toggle_histogram          -- forward declaration; defined after fetch_histogram
+local show_histogram_hover      -- forward declaration; defined after toggle_histogram
 
 --- Return a copy of `rules` with every row shifted down by `offset` lines.
 --- @param rules  table[]  highlight rules with 0-indexed relative rows
@@ -645,6 +649,10 @@ local function get_or_create_buf_state(buf_key, buf_title)
     column_cache  = nil,  -- column name -> FieldDescription, reset with table_path
     sep_columns   = {},   -- column name -> true, thousands separator toggled on via `t`
     is_loading    = false,
+    show_histogram   = false, -- `gh` toggle: chart documents over time above the table
+    histogram        = nil,   -- { status = "loading"|"ready"|"error", data|err } for the current query
+    histogram_req    = 0,     -- generation counter, so a late response for an old query is dropped
+    histogram_layout = nil,   -- from histogram.render, offset to absolute buffer rows
   }
   state.buffers[buf_key] = buf_state
 
@@ -682,8 +690,11 @@ local function get_or_create_buf_state(buf_key, buf_title)
     { desc = "Show source query", silent = true })
   buf:set_keymap("n", "e", function() export_results(buf_state) end,
     { desc = "Export results", silent = true })
-  buf:set_keymap("n", config.options.keymaps.hover_key, function() show_column_hover(buf_state) end,
-    { desc = "Show column info", silent = true })
+  buf:set_keymap("n", config.options.keymaps.hover_key, function()
+    if not show_histogram_hover(buf_state) then show_column_hover(buf_state) end
+  end, { desc = "Show column info (or histogram bucket)", silent = true })
+  buf:set_keymap("n", "gh", function() toggle_histogram(buf_state) end,
+    { desc = "Toggle documents-over-time histogram", silent = true })
   buf:set_keymap("n", "t", function() toggle_thousands_separator(buf_state) end,
     { desc = "Toggle thousands separator for column", silent = true })
   buf:set_keymap("n", "o", function() on_open_lob_in_buffer(buf_state) end,
@@ -738,6 +749,29 @@ local function apply_highlights(buf_state, tbl, label_line, tbl_offset, extra)
 end
 
 
+--- Render `buf_state.histogram` — whatever state it is in — as the lines that go
+--- under the row-count label, with highlight rules relative to those lines.
+--- @param buf_state table
+--- @return string[] lines
+--- @return table[]  rules
+--- @return table|nil layout  from histogram.render, only when a chart was drawn
+local function histogram_block(buf_state)
+  local h = buf_state.histogram
+  if not h or h.status == "loading" then
+    return { ICON_RUNNING .. " Fetching histogram…" },
+      { { higroup = "GrannosQueryRunning", start = { 0, 0 }, finish = { 0, -1 } } }, nil
+  end
+  if h.status == "error" then
+    local line = "Histogram unavailable: " .. tostring(h.err)
+    return { line }, { { higroup = "GrannosError", start = { 0, 0 }, finish = { 0, -1 } } }, nil
+  end
+  local sep = config.options.results.thousands_separator
+  return histogram.render(h.data, {
+    height              = config.options.results.histogram_height,
+    thousands_separator = sep and sep ~= "" and sep or nil,
+  })
+end
+
 --- Re-render the results table for `buf_state`, respecting the current page and visible columns.
 --- @param buf_state table
 render_table = function(buf_state)
@@ -768,16 +802,126 @@ render_table = function(buf_state)
     label = label .. "  ·  " .. format_duration(buf_state.duration_ms)
   end
   local content = { label, "" }
+  local extra = {}
+  -- The histogram, when toggled on, sits directly under the row-count label:
+  -- it summarises the same query the label counts, ahead of any output or data.
+  buf_state.histogram_layout = nil
+  if buf_state.show_histogram then
+    local h_lines, h_rules, layout = histogram_block(buf_state)
+    if layout then
+      layout.chart_top    = layout.chart_top    and layout.chart_top    + #content
+      layout.chart_bottom = layout.chart_bottom and layout.chart_bottom + #content
+      buf_state.histogram_layout = layout
+    end
+    vim.list_extend(extra, shift_rules(h_rules, #content))
+    vim.list_extend(content, h_lines)
+    table.insert(content, "")
+  end
   -- Statement output sits between the row-count label and the table, so it reads
   -- immediately above the data it accompanied.
   local msg_lines, msg_rules = messages.render_block(buf_state.messages)
+  vim.list_extend(extra, shift_rules(msg_rules, #content))
   vim.list_extend(content, msg_lines)
   local tbl_offset = #content
   vim.list_extend(content, tbl.text)
   buf_state.table_start = tbl_offset
   buf_state.buffer:set_content(content)
-  apply_highlights(buf_state, tbl, 0, tbl_offset, shift_rules(msg_rules, 2))
+  apply_highlights(buf_state, tbl, 0, tbl_offset, extra)
   update_truncation_indicators()
+end
+
+--- Return the driver descriptor from capabilities for `buf_state`'s connection, or nil.
+--- @param buf_state table
+--- @return table|nil driver  capabilities.drivers[] entry
+--- @return table|nil conn    the live connection (see grannos.get_conn)
+local function driver_for(buf_state)
+  local conn = buf_state.conn_key and require("grannos").get_conn(buf_state.conn_key)
+  if not conn then return nil, nil end
+  local caps = client.capabilities()
+  for _, d in ipairs(caps and caps.drivers or {}) do
+    if d.driver == conn.driver then return d, conn end
+  end
+  return nil, conn
+end
+
+--- How many buckets to ask the server for: one per column the results window
+--- can show beside the y-axis, so each bar is exactly one cell wide. The server
+--- picks a round interval yielding at most that many.
+--- @return integer
+local function histogram_buckets()
+  local win_id = current_results_win()
+  local width  = win_id and vim.api.nvim_win_is_valid(win_id) and vim.api.nvim_win_get_width(win_id) or 80
+  return math.max(10, math.min(200, width - 12))
+end
+
+--- Request the histogram for `buf_state`'s current query and re-render when it
+--- lands. A response for a query that is no longer the current one is dropped.
+--- @param buf_state table
+fetch_histogram = function(buf_state)
+  local driver, conn = driver_for(buf_state)
+  buf_state.histogram_req = buf_state.histogram_req + 1
+  local gen = buf_state.histogram_req
+  if not conn or not buf_state.query then
+    buf_state.histogram = { status = "error", err = "no query to chart" }
+    render_table(buf_state)
+    return
+  end
+  if driver and not driver.supports_histogram then
+    buf_state.histogram = { status = "error", err = (driver.label or conn.driver) .. " does not support histograms" }
+    render_table(buf_state)
+    return
+  end
+  buf_state.histogram = { status = "loading" }
+  render_table(buf_state)
+  client.request("execute.histogram", {
+    connection_id = conn.conn_id,
+    query         = buf_state.query,
+    buckets       = histogram_buckets(),
+  }, function(err, result)
+    vim.schedule(function()
+      if gen ~= buf_state.histogram_req or not buf_state.show_histogram then return end
+      if err then
+        buf_state.histogram = { status = "error", err = err }
+      else
+        buf_state.histogram = { status = "ready", data = result }
+      end
+      if buf_state.raw_rows and buf_state.buffer:is_valid() then render_table(buf_state) end
+    end)
+  end)
+end
+
+--- Toggle the documents-over-time chart for `buf_state` (`gh`). Only a single
+--- statement's result can be charted: a batch view has no one query to sum.
+--- @param buf_state table
+toggle_histogram = function(buf_state)
+  if buf_state.segments and #buf_state.segments > 0 then
+    vim.notify("grannos: the histogram is not available for a multi-statement batch", vim.log.levels.INFO)
+    return
+  end
+  if not buf_state.raw_rows then return end
+  buf_state.show_histogram = not buf_state.show_histogram
+  if buf_state.show_histogram then
+    fetch_histogram(buf_state)
+  else
+    buf_state.histogram = nil
+    buf_state.histogram_req = buf_state.histogram_req + 1
+    render_table(buf_state)
+  end
+end
+
+--- Show a hover float for the histogram bar under the cursor, if the cursor is
+--- on one. Returns false when it is not, so the caller can fall through.
+--- @param buf_state table
+--- @return boolean
+show_histogram_hover = function(buf_state)
+  local layout = buf_state.histogram_layout
+  local hist   = buf_state.histogram and buf_state.histogram.data
+  if not layout or not hist then return false end
+  local lines = histogram.describe_at(hist, layout, vim.fn.line(".") - 1, vim.fn.virtcol("."),
+    config.options.results.thousands_separator or nil)
+  if not lines then return false end
+  hover.open(lines, buf_state.buffer.buf_id, { above = true })
+  return true
 end
 
 
@@ -908,6 +1052,8 @@ function M.set_conn_name(key, driver_label, src_bufnr)
   buf_state.conn_key      = key
   buf_state.table_path    = nil
   buf_state.column_cache  = nil
+  buf_state.query         = nil  -- set_query follows for a run query; a preview has none
+  buf_state.query_ft      = nil
   state.active_src = buf_key
 end
 
@@ -1099,9 +1245,14 @@ function M.show_results(columns, rows, rows_returned, rows_total, duration_ms, m
   buf_state.duration_ms    = duration_ms
   buf_state.messages       = msgs
   buf_state.page           = 1
+  buf_state.histogram      = nil
+  buf_state.histogram_req  = buf_state.histogram_req + 1
   ensure_win(buf_state.buffer.buf_id)
   render_table(buf_state)
   reset_cursor()
+  -- The toggle is sticky per results buffer: once on, every new result of that
+  -- buffer is charted too, until `gh` turns it off again.
+  if buf_state.show_histogram then fetch_histogram(buf_state) end
 end
 
 --- Display a DML row-count message.
@@ -1184,6 +1335,13 @@ function M.show_message(msg)
   buf_state.buffer:set_content({ msg })
   buf_state.buffer:apply_highlight({})
   reset_cursor()
+end
+
+--- Toggle the documents-over-time histogram of the current tab's results
+--- window — what `gh` does there. A no-op when the tab has no results window.
+function M.toggle_histogram()
+  local buf_state = win_buf_state()
+  if buf_state then toggle_histogram(buf_state) end
 end
 
 --- Return true when `buf_id` is an grannos results buffer.
