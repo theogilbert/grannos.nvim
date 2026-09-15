@@ -88,10 +88,16 @@ describe("ui.conn_picker", function()
     type_filter("beta")
     feed("<CR>")
 
-    assert.equals("beta", out.chosen)
-    assert.is_false(out.cancelled)
+    -- The float is gone at once, but the selection is delivered on the next
+    -- event-loop turn so a prompt opened by the callback (the password input)
+    -- is not torn down by the submit keymap's pending stopinsert.
     assert.is_false(vim.api.nvim_win_is_valid(input_win))
     assert.equals(origin, vim.api.nvim_get_current_win())
+    assert.is_nil(out.chosen)
+    vim.wait(100, function() return out.chosen ~= nil end)
+
+    assert.equals("beta", out.chosen)
+    assert.is_false(out.cancelled)
   end)
 
   it("<C-c> cancels without selecting", function()

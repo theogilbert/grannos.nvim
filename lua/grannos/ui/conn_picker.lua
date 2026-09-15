@@ -51,7 +51,12 @@ function M.open(opts)
     empty_msg   = function() return "(no matching connection)" end,
     on_change   = function() end,
     on_close    = function()
-      if selected then opts.on_select(selected)
+      if selected then
+        -- The submit keymap has a `stopinsert` pending that only takes effect
+        -- once it returns. Defer the callback past it: a vim.ui.input opened
+        -- synchronously here (the password prompt) would otherwise start in
+        -- insert mode and be torn down by that InsertLeave immediately.
+        vim.schedule(function() opts.on_select(selected) end)
       elseif opts.on_cancel then opts.on_cancel() end
     end,
     on_submit   = function(row)
