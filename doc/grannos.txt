@@ -418,6 +418,16 @@ KEYMAPS ~
           again anywhere and it comes back everywhere.  Selections live in
           `$XDG_DATA_HOME/grannos/col_selections/`; selecting every column
           again forgets the entry and un-hides those names.
+          Inside the picker: Tab/Enter/Space move a column across, J/K
+          reorder the selected panel, `>` and `<` move every column at
+          once, `u` undoes the last change (`<C-R>` redoes it — every
+          change is applied and saved live, so undo is what takes an
+          accidental `<` back), and `/` filters the available panel:
+          type to narrow it (fuzzy), Enter to keep the filter while you
+          pick, Esc to clear it. With a filter on, `>` moves only the
+          matches, so `/event.` then `>` selects a whole family.
+  x       Hide the column under the cursor, saved like a picker selection.
+          Bring it back through the picker (`c`).
   o       Open the LOB cell under the cursor in a scratch buffer.
   S       Save the LOB cell under the cursor to a file on disk (prompted).
   [       Go to the previous page of results.

@@ -41,6 +41,7 @@ local segment_at_line           -- forward declaration; defined after render_seg
 local fetch_histogram           -- forward declaration; defined after render_table
 local toggle_histogram          -- forward declaration; defined after fetch_histogram
 local show_histogram_hover      -- forward declaration; defined after toggle_histogram
+local hide_column_at_cursor     -- forward declaration; defined after render_table
 
 --- Return a copy of `rules` with every row shifted down by `offset` lines.
 --- @param rules  table[]  highlight rules with 0-indexed relative rows
@@ -584,6 +585,21 @@ local function on_save_lob_to_disk(buf_state)
   end)
 end
 
+--- Hide the column under the cursor (`x`) — pruning while looking at the data,
+--- with no picker to go through. Saved like a picker selection, so it sticks;
+--- the picker (`c`) is where a hidden column comes back. Single results only:
+--- a batch view keeps every column.
+--- @param buf_state table
+hide_column_at_cursor = function(buf_state)
+  if not buf_state.table_data or not buf_state.raw_columns then return end
+  local col_idx  = table_fmt.get_column_at_cursor(buf_state.table_data.columns_width, vim.fn.virtcol("."))
+  local col_name = col_idx and buf_state.vis_columns[col_idx]
+  if not col_name then return end
+  table.remove(buf_state.vis_columns, col_idx)
+  col_selection.save(buf_state.raw_columns, buf_state.vis_columns)
+  render_table(buf_state)
+end
+
 --- Show a condensed column-description hover float for the column under the cursor.
 --- Only available when the current results came from an explorer table preview
 --- (`buf_state.table_path` set); a no-op otherwise, since arbitrary query results have
@@ -672,6 +688,8 @@ local function get_or_create_buf_state(buf_key, buf_title)
       render_table(buf_state)
     end)
   end, { desc = "Select displayed columns", silent = true })
+  buf:set_keymap("n", "x", function() hide_column_at_cursor(buf_state) end,
+    { desc = "Hide the column under the cursor", silent = true })
   buf:set_keymap("n", "]", function()
     if not buf_state.raw_rows then return end
     local page_size   = config.options.results.page_size
