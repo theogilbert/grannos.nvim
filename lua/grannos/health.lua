@@ -11,9 +11,10 @@ local client      = require("grannos.client")
 local config      = require("grannos.config")
 local connections = require("grannos.connections")
 
--- Languages with a symbol extractor (see grannos/symbols/init.lua). The first
--- three ship as precompiled parsers under parser/; json comes with Neovim.
-local LANGUAGES = { "sql", "cypher", "promql", "json" }
+-- Languages with a symbol extractor (see grannos/symbols/init.lua) or
+-- completion (grannos/completion/init.lua). All but json ship as precompiled
+-- parsers under parser/; json comes with Neovim.
+local LANGUAGES = { "sql", "cypher", "promql", "lucene", "json" }
 
 -- How long the probe waits for the backend to answer `capabilities`.
 local PROBE_TIMEOUT_MS = 5000
@@ -202,7 +203,7 @@ local function check_parsers(entries)
       add(entries, "ok", ("`%s` parser available"):format(lang))
     else
       add(entries, "warn", ("`%s` parser not available"):format(lang), {
-        ("Statement detection and symbol lookups will not work in %s buffers."):format(lang),
+        ("Statement detection, symbol lookups and completion will not work in %s buffers."):format(lang),
         lang == "json"
           and "Install it with `:TSInstall json` (used for MongoDB queries)."
           or ("grannos.nvim ships this parser in parser/%s.so — check that the plugin directory is on your runtimepath."):format(lang),

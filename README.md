@@ -216,7 +216,7 @@ If the current buffer has an associated connection the scope picker lets you cho
 
 Duplicate names within the same scope are rejected with a warning and you are re-prompted for the name.
 
-Queries are stored as plain files under `~/.local/share/grannos/queries/` and inherit the file extension of the source buffer (e.g. `.sql`, `.cypher`).
+Queries are stored as plain files under `~/.local/share/grannos/queries/` and inherit the file extension of the source buffer (e.g. `.sql`, `.cypher`, `.lucene`).
 
 ### 6. Load saved queries
 

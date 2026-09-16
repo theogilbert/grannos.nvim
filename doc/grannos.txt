@@ -323,7 +323,8 @@ The directory tree mirrors the scope hierarchy: >
   group/<server>/<driver>/<group>/<name>.<ext>
   connection/<server>/<driver>/<group>/<conn>/<name>.<ext>
 <
-The file extension is taken from the source buffer (e.g. `.sql`, `.cypher`).
+The file extension is taken from the source buffer (e.g. `.sql`, `.cypher`,
+`.lucene`).
 Files can be opened, edited, and deleted directly in the filesystem.
 The directory is created automatically on first save. Override the location
 with |grannos-queries_dir|.
@@ -464,9 +465,10 @@ The bars use `GrannosHistogramBar`; the chart's height is
 ================================================================================
 COMPLETION                                                *grannos-completion*
 
-A SQL, Cypher or PromQL buffer associated with a connection gets 'omnifunc'
-set, so |i_CTRL-X_CTRL-O| completes database names in place. No completion plugin is
-required; any engine that wraps 'omnifunc' picks this up automatically.
+A SQL, Cypher, PromQL or Lucene buffer associated with a connection gets
+'omnifunc' set, so |i_CTRL-X_CTRL-O| completes database names in place. No
+completion plugin is required; any engine that wraps 'omnifunc' picks this up
+automatically.
 
 What is offered depends on where the cursor sits. In SQL:
 
@@ -531,6 +533,27 @@ In PromQL (Prometheus):
           completes to `node-exporter` rather than matching nothing past
           the hyphen.
 
+In Lucene (Elasticsearch in its Lucene query mode — `<index> | <query>`,
+the `lucene` filetype, detected for `.lucene` files):
+
+  ahead of the pipe
+          Index names, at the start of the line and after each `,` of a
+          list. Dashes, dots and `*` are part of the word, so `logs-2024.`
+          completes to `logs-2024.01`.
+
+  anywhere a clause can start
+          The fields of every index the query names — after the pipe, an
+          `AND`/`OR`/`NOT`, a `+`/`-`, or an opening parenthesis — each
+          annotated with its mapping type, nested properties and
+          multi-fields as dotted paths (`user.name`, `message.keyword`).
+          A pattern or alias (`logs-*`) is looked up as written and the
+          server merges the mappings of everything it matches. The value
+          of `_exists_:` is a field too.
+
+  as a field's value
+          Nothing: the mapping lists no values. A field's value, a
+          phrase, a range bound and a regex offer no candidates.
+
 Candidates are filtered by what has been typed, case-insensitively.
 
 AS YOU TYPE (nvim-cmp) ~                              *grannos-completion-cmp*
@@ -542,7 +565,7 @@ native nvim-cmp source named `grannos`: >lua
   })
 <
 Or, to keep it to query buffers alone: >lua
-  require("cmp").setup.filetype({ "sql", "cypher", "promql" }, {
+  require("cmp").setup.filetype({ "sql", "cypher", "promql", "lucene" }, {
     sources = { { name = "grannos" }, { name = "buffer" } },
   })
 <
@@ -787,10 +810,11 @@ connections_file ~
 completion.enabled ~
   Type: `boolean`   Default: `true`
 
-  Set 'omnifunc' on SQL, Cypher and PromQL buffers that have a connection,
-  so |i_CTRL-X_CTRL-O| completes table and column names, labels,
-  relationship types and properties, or metrics, labels and jobs. See
-  |grannos-completion|. Set to false to leave 'omnifunc' alone.
+  Set 'omnifunc' on SQL, Cypher, PromQL and Lucene buffers that have a
+  connection, so |i_CTRL-X_CTRL-O| completes table and column names,
+  labels, relationship types and properties, metrics, labels and jobs, or
+  index and field names. See |grannos-completion|. Set to false to leave
+  'omnifunc' alone.
 
                                       *grannos-completion-max_schema_scan*
 completion.max_schema_scan ~
@@ -936,9 +960,10 @@ BACKEND ~
     server started by |:DbAttach|.
 
 TREESITTER PARSERS ~
-    The `sql`, `cypher`, `promql` and `json` parsers used to find the
-    statement and the symbol under the cursor. The first three ship with
-    this plugin; `json` (used for MongoDB queries) comes with Neovim.
+    The `sql`, `cypher`, `promql`, `lucene` and `json` parsers used to
+    find the statement and the symbol under the cursor, and to complete
+    names. All but `json` (used for MongoDB queries, and shipped with
+    Neovim) ship with this plugin.
 
 OPTIONAL DEPENDENCIES ~
     Whether fzf-lua is installed for the saved-query picker; without it
