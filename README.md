@@ -158,6 +158,7 @@ Results appear in a split window with aligned columns and a row count. For DML q
 | `[` / `]` | Previous / next page |
 | `R` | Re-run the query that produced the results |
 | `s` | Open the session settings for the results' connection (e.g. the time range) |
+| `p` | Pin the pane: keep its results and show the next query's result beside it |
 | `q` | Close the results window |
 | `g?` | Show keymap reference |
 

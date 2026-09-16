@@ -11,6 +11,9 @@
 -- Within a tab, a results buffer already displayed in some window is refreshed
 -- there rather than being moved into the tab's last-used results window, so
 -- panes the user has split off for particular connections stay put.
+-- `p` pins a pane: its buffer is taken out of the (source buffer, connection)
+-- slot so the next query from that source gets a fresh buffer and window, and
+-- the pinned one keeps its results beside it for comparison.
 local Buffer         = require("grannos.buffer")
 local table_fmt      = require("grannos.table")
 local hl             = require("grannos.hl")
@@ -162,6 +165,7 @@ local state = {
   win_ids    = {},
   autocmds   = {},
   active_src = nil,  -- buf_key set by set_conn_name before each query
+  pins       = 0,    -- pinned panes so far, numbering their buffer names
 }
 
 --- Return the buf_state for the currently active source buffer, or nil.
@@ -338,16 +342,39 @@ vim.api.nvim_create_autocmd("BufWinEnter", {
   callback = function() ensure_win_setup(vim.api.nvim_get_current_win()) end,
 })
 
---- Open a new results split/vsplit for the current tab.
+--- Return the last non-floating window in the current tab showing a pinned
+--- results buffer, or nil.
+--- @return integer|nil
+local function last_pinned_win()
+  local found
+  for _, win_id in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    local buf_state = win_buf_state_for(win_id)
+    if buf_state and buf_state.pinned and vim.api.nvim_win_get_config(win_id).relative == "" then
+      found = win_id
+    end
+  end
+  return found
+end
+
+--- Open a new results split/vsplit for the current tab. When the tab holds a
+--- pinned pane, the new one opens beside it — side by side under a `below`
+--- layout, where a second full-width split would stack them and eat editor
+--- height — so a pinned result and the next one can be compared.
 --- @param buf_id integer
 local function open_win(buf_id)
   local opts     = config.options.results
+  local pinned   = last_pinned_win()
   local cmd      = opts.split == "right"
       and "botright vsplit"
       or  ("botright " .. opts.height .. "split")
   local prev_win = vim.api.nvim_get_current_win()
   local tab      = vim.api.nvim_get_current_tabpage()
-  vim.cmd(cmd)
+  if pinned and opts.split ~= "right" then
+    vim.api.nvim_set_current_win(pinned)
+    vim.cmd("rightbelow vsplit")
+  else
+    vim.cmd(cmd)
+  end
   local win_id = vim.api.nvim_get_current_win()
   state.win_ids[tab] = win_id
   vim.api.nvim_win_set_buf(win_id, buf_id)
@@ -491,6 +518,40 @@ local function rerun_query(buf_state)
     end
   end
   require("grannos.executor").run(conn, buf_state.query, src_bufnr, first_line)
+end
+
+--- Pin the pane: move its buf_state out of the (source buffer, connection)
+--- slot so the next query from that source is shown in a fresh buffer and
+--- window, leaving this one untouched beside it. The buffer is renamed with a
+--- pin number so it stays listed and distinguishable; every key in it still
+--- works on its own results (`R` re-runs into it, `q` closes it). A query
+--- still in flight for this pane lands here, since it is that query's result.
+--- @param buf_state table
+local function pin_pane(buf_state)
+  if buf_state.pinned then
+    vim.notify("grannos: already pinned — q closes it", vim.log.levels.INFO)
+    return
+  end
+  local old_key
+  for key, bs in pairs(state.buffers) do
+    if bs == buf_state then old_key = key; break end
+  end
+  if not old_key then return end
+  state.pins = state.pins + 1
+  local new_key = old_key .. "\0pin" .. state.pins
+  state.buffers[old_key] = nil
+  state.buffers[new_key] = buf_state
+  if state.active_src == old_key then state.active_src = new_key end
+  buf_state.pinned = true
+  pcall(vim.api.nvim_buf_set_name, buf_state.buffer.buf_id,
+    vim.api.nvim_buf_get_name(buf_state.buffer.buf_id) .. (" (pin %d)"):format(state.pins))
+  -- The window is no longer the tab's target for the next result.
+  for tab, win_id in pairs(state.win_ids) do
+    if vim.api.nvim_win_is_valid(win_id)
+      and vim.api.nvim_win_get_buf(win_id) == buf_state.buffer.buf_id then
+      state.win_ids[tab] = nil
+    end
+  end
 end
 
 --- Open `content` in a new unnamed, listed buffer in a vertical split of the results
@@ -703,6 +764,7 @@ local function get_or_create_buf_state(buf_key, buf_title)
     column_cache  = nil,  -- column name -> FieldDescription, reset with table_path
     sep_columns   = {},   -- column name -> true, thousands separator toggled on via `t`
     is_loading    = false,
+    pinned        = false, -- `p`: detached from its buf_key so the next result goes elsewhere
     show_histogram   = false, -- `gh` toggle: chart documents over time above the table
     histogram        = nil,   -- { status = "loading"|"ready"|"error", data|err } for the current query
     histogram_req    = 0,     -- generation counter, so a late response for an old query is dropped
@@ -746,6 +808,8 @@ local function get_or_create_buf_state(buf_key, buf_title)
     { desc = "Show source query", silent = true })
   buf:set_keymap("n", "R", function() rerun_query(buf_state) end,
     { desc = "Re-run the query", silent = true })
+  buf:set_keymap("n", "p", function() pin_pane(buf_state) end,
+    { desc = "Pin: keep this pane, show the next result beside it", silent = true })
   buf:set_keymap("n", "s", function()
     if not buf_state.conn_key then
       vim.notify("grannos: no connection for these results", vim.log.levels.WARN)

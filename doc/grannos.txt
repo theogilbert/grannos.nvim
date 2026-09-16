@@ -443,6 +443,13 @@ KEYMAPS ~
           or sort can be changed and the query re-run with `R` without
           leaving the pane. In the form, `x` clears the field under the
           cursor; a setting saved empty reverts to its default.
+  p       Pin the pane. Its results stay as they are, and the next query
+          from the same buffer opens a new pane beside it — to the right
+          under a `below` layout, so the two can be read side by side —
+          instead of replacing them. The pinned buffer is renamed with a
+          pin number (`grannos://results [...] (pin 1)`), stays listed,
+          and every key still works on its own results: `R` re-runs its
+          query into it, `q` closes it.
   q       Close the results window.
   g?      Show a keymap reference float.
 
