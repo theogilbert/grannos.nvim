@@ -845,8 +845,8 @@ local function driver_for(buf_state)
 end
 
 --- How many buckets to ask the server for: one per column the results window
---- can show beside the y-axis, so each bar is exactly one cell wide. The server
---- picks a round interval yielding at most that many.
+--- can show beside the y-axis, so each bar is exactly one cell wide and the
+--- chart spans the window. The server divides the time span into that many.
 --- @return integer
 local function histogram_buckets()
   local win_id = current_results_win()

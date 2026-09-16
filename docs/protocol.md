@@ -269,14 +269,14 @@ The query string is exactly what `execute` takes, and the driver applies the sam
 |-----------------|--------------------|-----------------------------------------------------------------------------|
 | `connection_id` | string             | Connection to execute on                                                    |
 | `query`         | string             | The query, as it would be passed to `execute`                               |
-| `buckets`       | integer (optional) | Target number of buckets; default 50, capped at 500. The driver picks a round interval that yields about this many — typically one per column the client can draw — so the actual count may be lower. |
+| `buckets`       | integer (optional) | How many buckets to divide the time span into; default 50, capped at 500. The driver returns at most this many and as near it as its bucket alignment allows (Elasticsearch: this many or one fewer), so a client asking for one per column it can draw gets the columns filled. |
 
 **result**
 
 | Field         | Type                                         | Description                                                    |
 |---------------|----------------------------------------------|----------------------------------------------------------------|
 | `field`       | string                                       | The time field the documents were bucketed on                  |
-| `interval`    | string                                       | Width of every bucket as a short duration (`"5m"`, `"1h"`, `"1d"`); `""` when the driver could not tell |
+| `interval`    | string                                       | Width of every bucket as a short duration (`"5m"`, `"1h"`, `"9m36s"`); `""` when the driver could not tell |
 | `buckets`     | array of [HistogramBucket](#histogrambucket) | Ascending; empty when the query matched nothing                |
 | `duration_ms` | number                                       | Wall-clock execution time in milliseconds                      |
 

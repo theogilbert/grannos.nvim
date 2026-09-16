@@ -446,11 +446,13 @@ time field — the same field, range and query the table came from:
                                                                         ~
     │ @timestamp           │ level │ message              │
 
-Each bar is one column wide and one bucket long; the server picks a round
-interval (the "per bar" width) so that at most one bucket per column of the
-window is returned. The counts cover every matching document, not just the
-rows the table shows. Axis labels are in local time. |grannos-hover-key| on
-a bar shows the bucket's time span and exact count.
+Each bar is one column wide and one bucket long: the query's time span —
+the session range, or the matches' own where it is open — is divided into as
+many buckets as the window has columns, so the chart fills its width. The
+"per bar" width is therefore whatever that division yields ("9m36s"), not a
+round interval. The counts cover every matching document, not just the rows
+the table shows. Axis labels are in local time. |grannos-hover-key| on a bar
+shows the bucket's time span and exact count.
 
 The chart is off by default. `gh` turns it on for the current results
 buffer — it then stays on, re-fetched for each new result shown there, until
