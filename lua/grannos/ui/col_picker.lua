@@ -7,9 +7,11 @@
 -- K/J (right panel only) move the item under the cursor up/down.
 -- >   move all available columns to selected (only the matches, when filtering).
 -- <   move all selected columns back to available.
--- /   filter the available panel: type to narrow it (fuzzy), Enter to keep the
---     filter and go back to picking, Esc to clear it. While a filter is on,
---     Esc in the picker clears it rather than closing.
+-- /   filter the available panel: type to narrow it (fuzzy). While typing,
+--     Down/Up move among the matches and Tab picks the highlighted one and
+--     clears the filter, ready for the next name. Enter keeps the filter and
+--     goes back to picking, Esc clears it. While a filter is on, Esc in the
+--     picker clears it rather than closing.
 -- u   undo the last change; Ctrl-R redo. Every change is applied live via the
 --     on_change callback, so an accidental < or > has already reached the
 --     table (and the saved selection) — undo is what takes it back.
@@ -364,14 +366,22 @@ function M.open(all_cols, vis_cols, on_change)
   end
 
   --- Type a filter for the available panel, narrowing it as each character
-  --- lands. Enter keeps the filter in force and hands the keys back to the
-  --- picker; Esc drops it. Reads keys directly rather than through a prompt
-  --- buffer so the panels can redraw between keystrokes.
+  --- lands. Always starts empty: a filter kept from an earlier `/` is what
+  --- Enter leaves in force, and pressing `/` again means a new search, not
+  --- an edit of the old one. While typing, Down/Up (or Ctrl-N/Ctrl-P) move
+  --- among the matches and Tab picks the highlighted one and clears the
+  --- filter, so the next name can be typed straight away without leaving
+  --- the prompt. Enter keeps the filter in force and hands the keys back to
+  --- the picker; Esc drops it. Reads keys directly rather than through a
+  --- prompt buffer so the panels can redraw between keystrokes.
   local function edit_filter()
     p.filter_editing = true
+    p.filter = ""
     p.side   = "left"
     p.cursor = 1
-    local bs = { [vim.keycode("<BS>")] = true, [vim.keycode("<C-h>")] = true, ["\127"] = true }
+    local bs   = { [vim.keycode("<BS>")] = true, [vim.keycode("<C-h>")] = true, ["\127"] = true }
+    local down = { [vim.keycode("<Down>")] = true, [vim.keycode("<C-n>")] = true }
+    local up   = { [vim.keycode("<Up>")] = true, [vim.keycode("<C-p>")] = true }
     while true do
       render()
       vim.cmd.redraw()
@@ -382,14 +392,27 @@ function M.open(all_cols, vis_cols, on_change)
       elseif ch == "\r" or ch == "\n" then
         if p.filter == "" then p.filter = nil end
         break
+      elseif ch == "\t" then
+        if shown_available()[p.cursor] then
+          move_item()
+          p.filter = ""
+          p.side   = "left"
+          p.cursor = 1
+        end
+      elseif down[ch] then
+        p.cursor = math.min(p.cursor + 1, math.max(#shown_available(), 1))
+      elseif up[ch] then
+        p.cursor = math.max(1, p.cursor - 1)
       elseif bs[ch] then
-        p.filter = vim.fn.strcharpart(p.filter or "", 0, vim.fn.strchars(p.filter or "") - 1)
+        p.filter = vim.fn.strcharpart(p.filter, 0, vim.fn.strchars(p.filter) - 1)
+        p.cursor = 1
       elseif ch == vim.keycode("<C-u>") then
         p.filter = ""
+        p.cursor = 1
       elseif #ch == 1 and ch:byte() >= 32 or #ch > 1 and ch:byte() >= 128 then
-        p.filter = (p.filter or "") .. ch  -- printable, single- or multi-byte
+        p.filter = p.filter .. ch  -- printable, single- or multi-byte
+        p.cursor = 1
       end
-      p.cursor = 1
     end
     p.filter_editing = false
     if #shown_available() == 0 then p.side = "right" end

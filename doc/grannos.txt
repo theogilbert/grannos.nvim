@@ -423,9 +423,12 @@ KEYMAPS ~
           once, `u` undoes the last change (`<C-R>` redoes it — every
           change is applied and saved live, so undo is what takes an
           accidental `<` back), and `/` filters the available panel:
-          type to narrow it (fuzzy), Enter to keep the filter while you
-          pick, Esc to clear it. With a filter on, `>` moves only the
-          matches, so `/event.` then `>` selects a whole family.
+          type to narrow it (fuzzy), Down/Up to move among the matches,
+          Tab to pick the highlighted one — that clears the filter, so
+          type the next name straight away: `/email<Tab>name<Tab><Esc>`.
+          Enter keeps the filter while you pick, Esc clears it. With a
+          filter on, `>` moves only the matches, so `/event.` then `>`
+          selects a whole family.
   x       Hide the column under the cursor, saved like a picker selection.
           Bring it back through the picker (`c`).
   o       Open the LOB cell under the cursor in a scratch buffer.
