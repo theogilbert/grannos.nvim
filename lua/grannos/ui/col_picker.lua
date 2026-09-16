@@ -72,9 +72,11 @@ local function render()
   -- Separator row
   table.insert(lines, string.rep("─", cw) .. "┼" .. string.rep("─", cw))
 
-  -- Item rows — pad both sides so every line is exactly cw+SEP_LEN+cw bytes
+  -- Item rows — pad both sides so every line is exactly cw+SEP_LEN+cw bytes.
+  -- At least enough rows to fill the window, so the divider runs to its
+  -- bottom edge when a filter or a lopsided split leaves a panel short.
   local available = shown_available()
-  local n = math.max(#available, #p.selected, 1)
+  local n = math.max(#available, #p.selected, 1, (p.height or 2) - 2)
   for i = 1, n do
     local ltext = available[i] and ("  " .. available[i]) or ""
     local rtext = p.selected[i] and ("  " .. p.selected[i]) or ""
@@ -292,6 +294,7 @@ function M.open(all_cols, vis_cols, on_change)
     side           = #available > 0 and "left" or "right",
     cursor         = 1,
     col_width      = col_width,
+    height         = inner_h,
     on_change      = on_change,
     history        = {},
     redo           = {},
@@ -379,38 +382,45 @@ function M.open(all_cols, vis_cols, on_change)
     p.filter = ""
     p.side   = "left"
     p.cursor = 1
-    local bs   = { [vim.keycode("<BS>")] = true, [vim.keycode("<C-h>")] = true, ["\127"] = true }
-    local down = { [vim.keycode("<Down>")] = true, [vim.keycode("<C-n>")] = true }
-    local up   = { [vim.keycode("<Up>")] = true, [vim.keycode("<C-p>")] = true }
+    -- Keys are matched by their |keytrans()| name, so a special key arrives
+    -- as "<Down>" whatever bytes the terminal sent, and only a key with no
+    -- such name — a plain character — is ever typed into the filter. An
+    -- unrecognised special key (a function key, an Alt chord, a stray
+    -- escape sequence) is ignored rather than inserted as its raw bytes.
+    local bs   = { ["<BS>"] = true, ["<C-H>"] = true, ["<Del>"] = true }
+    local down = { ["<Down>"] = true, ["<C-N>"] = true }
+    local up   = { ["<Up>"] = true, ["<C-P>"] = true }
+    local literal = { ["<Space>"] = " ", ["<lt>"] = "<" }
     while true do
       render()
       vim.cmd.redraw()
       local ok, ch = pcall(vim.fn.getcharstr)
-      if not ok or ch == vim.keycode("<Esc>") or ch == vim.keycode("<C-c>") then
+      local key = ok and (ch == "\127" and "<Del>" or vim.fn.keytrans(ch)) or "<C-C>"
+      if key == "<C-C>" or key:sub(1, 5) == "<Esc>" then
         p.filter = nil
         break
-      elseif ch == "\r" or ch == "\n" then
+      elseif key == "<CR>" or key == "<NL>" then
         if p.filter == "" then p.filter = nil end
         break
-      elseif ch == "\t" then
+      elseif key == "<Tab>" then
         if shown_available()[p.cursor] then
           move_item()
           p.filter = ""
           p.side   = "left"
           p.cursor = 1
         end
-      elseif down[ch] then
+      elseif down[key] then
         p.cursor = math.min(p.cursor + 1, math.max(#shown_available(), 1))
-      elseif up[ch] then
+      elseif up[key] then
         p.cursor = math.max(1, p.cursor - 1)
-      elseif bs[ch] then
+      elseif bs[key] then
         p.filter = vim.fn.strcharpart(p.filter, 0, vim.fn.strchars(p.filter) - 1)
         p.cursor = 1
-      elseif ch == vim.keycode("<C-u>") then
+      elseif key == "<C-U>" then
         p.filter = ""
         p.cursor = 1
-      elseif #ch == 1 and ch:byte() >= 32 or #ch > 1 and ch:byte() >= 128 then
-        p.filter = p.filter .. ch  -- printable, single- or multi-byte
+      elseif literal[key] or not key:match("^<.*>$") then
+        p.filter = p.filter .. (literal[key] or ch)
         p.cursor = 1
       end
     end

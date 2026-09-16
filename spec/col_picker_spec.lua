@@ -150,6 +150,24 @@ describe("ui.col_picker", function()
       assert.same({ "updated_at", "created_at" }, out.last)
     end)
 
+    it("keeps the divider running to the bottom of the window when filtered", function()
+      open({})
+      feed("/nam<CR>")
+      local height = vim.api.nvim_win_get_height(0)
+      local lines  = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+      assert.is_true(#lines >= height)
+      for i = 3, height do
+        assert.truthy(lines[i]:find("│", 1, true), "row " .. i .. " has no divider")
+      end
+    end)
+
+    it("ignores special keys instead of typing their bytes into the filter", function()
+      open({})
+      feed("/na<F5><M-x><C-a>m<CR>")
+      assert.same({ "name" }, available_shown())
+      assert.equal(" Columns  /nam  1 of 5 ", title())
+    end)
+
     it("/ starts a fresh filter rather than extending the kept one", function()
       open({})
       feed("/at<CR>/nam<CR>")
