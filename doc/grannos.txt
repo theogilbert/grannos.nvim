@@ -438,6 +438,11 @@ KEYMAPS ~
   gh      Toggle the documents-over-time histogram, see |grannos-histogram|.
   R       Re-run the query that produced the results, against the same
           connection, and show the new results here.
+  s       Open the session settings form for the results' connection —
+          the same form as `s` in the connections panel — so a time range
+          or sort can be changed and the query re-run with `R` without
+          leaving the pane. In the form, `x` clears the field under the
+          cursor; a setting saved empty reverts to its default.
   q       Close the results window.
   g?      Show a keymap reference float.
 

@@ -746,6 +746,13 @@ local function get_or_create_buf_state(buf_key, buf_title)
     { desc = "Show source query", silent = true })
   buf:set_keymap("n", "R", function() rerun_query(buf_state) end,
     { desc = "Re-run the query", silent = true })
+  buf:set_keymap("n", "s", function()
+    if not buf_state.conn_key then
+      vim.notify("grannos: no connection for these results", vim.log.levels.WARN)
+      return
+    end
+    require("grannos").open_session_settings_for(buf_state.conn_key)
+  end, { desc = "Session settings for this connection", silent = true })
   buf:set_keymap("n", "e", function() export_results(buf_state) end,
     { desc = "Export results", silent = true })
   buf:set_keymap("n", config.options.keymaps.hover_key, function()

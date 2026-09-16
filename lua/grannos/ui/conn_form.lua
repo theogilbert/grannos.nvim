@@ -23,6 +23,7 @@ local HELP_KEYMAPS = {
   { lhs = "j/<Down>", desc = "Next field/button",     group = "Navigate" },
   { lhs = "k/<Up>",   desc = "Previous field/button", group = "Navigate" },
   { lhs = "<CR>/<Space>", desc = "Update the field under the cursor (edit, toggle checkbox, or run Test Connection)", group = "Navigate" },
+  { lhs = "x",        desc = "Clear the field under the cursor (a session setting then reverts to its default on save)", group = "Navigate" },
   { lhs = "<C-s>",    desc = "Save",           group = "" },
   { lhs = "q/<Esc>",  desc = "Cancel",         group = "" },
   { lhs = "g?",       desc = "Show this help", group = "" },
@@ -92,7 +93,7 @@ local function render()
     err_row, err_last = append_message(lines, f.error)
     table.insert(lines, "")
   end
-  table.insert(lines, "  <Enter>/<Space> update   <C-s> save   q/<Esc> cancel   g? help")
+  table.insert(lines, "  <Enter>/<Space> update   x clear   <C-s> save   q/<Esc> cancel   g? help")
 
   -- Last line of defence: a field's display() carries whatever was typed or
   -- pasted into it, and one newline anywhere would fail the whole set_lines
@@ -361,6 +362,17 @@ local function activate()
   end
 end
 
+--- Clear the field under the cursor, for fields that offer `clear` (text and
+--- choice fields built from driver params). Emptying a value is otherwise a
+--- matter of opening the overlay and deleting what is there — and a session
+--- setting sent empty is what restores its default on the server.
+local function clear_field()
+  local field = f.fields[f.cursor]
+  if not field or not field.clear then return end
+  field.clear()
+  render()
+end
+
 --- Validate required fields, gather values, and hand them to on_submit.
 --- on_submit's `done(err)` either closes the form (err == nil) or keeps it
 --- open with an inline error message (err ~= nil) so the user can fix the
@@ -400,7 +412,7 @@ end
 ---   .fields    table[]  ConnFormField list (see module docstring for the shape:
 ---              key, label, kind ("text"|"secret"|"choice"|"toggle"), get, display, is_valid,
 ---              edit_prefill/commit_text for text/secret, options/commit_choice for choice,
----              toggle for toggle)
+---              toggle for toggle, optional clear for any field `x` may empty)
 ---   .on_submit fun(values: table<string, any>, done: fun(err: string|nil))
 ---   .on_cancel fun()
 ---   .on_test   fun(values: table<string, any>, done: fun(ok: boolean, err: string|nil))|nil
@@ -463,6 +475,7 @@ function M.open(opts)
   map("<Up>",   nav_up)
   map("<CR>",    activate)
   map("<Space>", activate)
+  map("x",       clear_field)
   map("<C-s>",  submit)
   map("q",      cancel)
   map("<Esc>",  cancel)

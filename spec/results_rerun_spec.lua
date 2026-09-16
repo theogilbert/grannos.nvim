@@ -13,6 +13,9 @@ package.loaded["grannos"] = {
   get_conn = function(key) return (conn_open and key == CONN_KEY) and CONN or nil end,
 }
 
+local session_opened = {}
+package.loaded["grannos"].open_session_settings_for = function(key) table.insert(session_opened, key) end
+
 local runs = {}
 package.loaded["grannos.executor"] = {
   run = function(conn, query, bufnr, first_line)
@@ -111,6 +114,14 @@ describe("results R re-runs the query", function()
     press_R()
     assert.equals(0, #runs)
     assert.truthy(notices[1]:find("connection"))
+  end)
+
+  it("s opens the session settings for the results' connection", function()
+    show(source_buf(), 1)
+    session_opened = {}
+    vim.api.nvim_set_current_win(results_win())
+    vim.api.nvim_feedkeys("s", "x", false)
+    assert.same({ CONN_KEY }, session_opened)
   end)
 
   it("does nothing when the source buffer is gone", function()

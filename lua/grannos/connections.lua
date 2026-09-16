@@ -373,6 +373,7 @@ local function driver_param_field(p, current)
     required = required,
     get      = function() return raw end,
     is_valid = function() return not required or raw ~= "" end,
+    clear    = function() raw = "" end,
   }
 
   if field.kind == "choice" then

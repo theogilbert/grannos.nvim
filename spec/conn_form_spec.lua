@@ -71,3 +71,51 @@ describe("conn_form rendering", function()
     end
   end)
 end)
+
+describe("conn_form x clears a field", function()
+  local CAPS = { drivers = { {
+    driver = "es", label = "Elasticsearch", languages = {}, params = {},
+    session_params = {
+      { key = "time_from", type = "string", label = "From", required = false },
+      { key = "sort_order", type = "enum", label = "Sort", required = false, default = "desc",
+        choices = { { value = "asc" }, { value = "desc" } } },
+    },
+  } } }
+
+  --- Open a session-settings form built from CAPS with `current` values,
+  --- press `keys`, and submit; returns the values handed to on_submit.
+  --- @param current table
+  --- @param keys    string
+  --- @return table|nil
+  local function submitted_after(current, keys)
+    local fields = require("grannos.connections").session_fields(CAPS, "es", current)
+    local got
+    conn_form.open({
+      title = "Session", fields = fields, on_cancel = function() end,
+      on_submit = function(values, done) got = values; done(nil) end,
+    })
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(keys .. "<C-s>", true, false, true), "x", false)
+    return got
+  end
+
+  it("empties a text field so it is sent empty (restoring the server default)", function()
+    local got = submitted_after({ time_from = "-1h", sort_order = "asc" }, "x")
+    assert.same({ time_from = "", sort_order = "asc" }, got)
+  end)
+
+  it("empties a choice field too", function()
+    local got = submitted_after({ time_from = "-1h", sort_order = "asc" }, "jx")
+    assert.same({ time_from = "-1h", sort_order = "" }, got)
+  end)
+
+  it("shows the cleared value as (none) and lists x in the footer", function()
+    local fields = require("grannos.connections").session_fields(CAPS, "es", { time_from = "-1h" })
+    conn_form.open({ title = "Session", fields = fields, on_cancel = function() end,
+      on_submit = function(_, done) done(nil) end })
+    local buf = vim.api.nvim_get_current_buf()
+    vim.api.nvim_feedkeys("x", "x", false)
+    local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    assert.truthy(lines[1]:find("From: (none)", 1, true))
+    assert.truthy(lines[#lines]:find("x clear", 1, true))
+  end)
+end)
