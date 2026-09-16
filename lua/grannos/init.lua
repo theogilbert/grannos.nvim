@@ -876,7 +876,9 @@ function M.show_query_info()
     hover.close()
     local results_ui = require("grannos.ui.results")
     local conn       = state.conns[conn_key]
-    results_ui.set_conn_name(conn_key, conn and conn.driver_label, entry.bufnr or bufnr)
+    local src_bufnr  = entry.bufnr or bufnr
+    results_ui.set_conn_name(conn_key, conn and conn.driver_label, src_bufnr)
+    results_ui.set_query(entry.sql, vim.bo[src_bufnr].filetype, src_bufnr, entry.source_line)
     if entry.status == "success" then
       results_ui.show_results(
         entry.columns or {}, log.load_rows(entry),

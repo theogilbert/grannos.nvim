@@ -457,6 +457,42 @@ local function show_source_query(buf_state)
   end
 end
 
+--- Run the query that produced the current results again, against the same
+--- connection and from the same source buffer, so the results land back in this
+--- buffer. The source position is passed along only while the buffer still holds
+--- the same text there, so gutter marks and batch splitting never act on lines
+--- the user has since edited; otherwise the stored text runs as one statement.
+--- @param buf_state table
+local function rerun_query(buf_state)
+  if buf_state.is_loading then
+    vim.notify("grannos: query still running", vim.log.levels.INFO)
+    return
+  end
+  if not buf_state.query then
+    vim.notify("grannos: no query to re-run", vim.log.levels.INFO)
+    return
+  end
+  local conn = buf_state.conn_key and require("grannos").get_conn(buf_state.conn_key)
+  if not conn then
+    vim.notify("grannos: connection is no longer open", vim.log.levels.WARN)
+    return
+  end
+  local src_bufnr = buf_state.src_bufnr
+  if src_bufnr and not vim.api.nvim_buf_is_valid(src_bufnr) then
+    vim.notify("grannos: source buffer is gone", vim.log.levels.WARN)
+    return
+  end
+  local first_line = nil
+  if src_bufnr and buf_state.first_line then
+    local want   = vim.split(buf_state.query, "\n", { plain = true })
+    local have   = vim.api.nvim_buf_get_lines(src_bufnr, buf_state.first_line, buf_state.first_line + #want, false)
+    if table.concat(have, "\n") == buf_state.query then
+      first_line = buf_state.first_line
+    end
+  end
+  require("grannos.executor").run(conn, buf_state.query, src_bufnr, first_line)
+end
+
 --- Open `content` in a new unnamed, listed buffer in a vertical split of the results
 --- window it was exported from, so the export stays next to the results it came from.
 --- Falls back to splitting the current window when that results window is gone.
@@ -660,6 +696,8 @@ local function get_or_create_buf_state(buf_key, buf_title)
     page          = 1,
     query         = nil,
     query_ft      = nil,
+    src_bufnr     = nil,  -- source buffer the query was run from, for `R`
+    first_line    = nil,  -- 0-indexed line of the query in src_bufnr, for `R`
     conn_key      = nil,
     table_path    = nil,  -- explore-tree path to the source table, if known
     column_cache  = nil,  -- column name -> FieldDescription, reset with table_path
@@ -706,6 +744,8 @@ local function get_or_create_buf_state(buf_key, buf_title)
   end, { desc = "Previous page", silent = true })
   buf:set_keymap("n", "gq", function() show_source_query(buf_state) end,
     { desc = "Show source query", silent = true })
+  buf:set_keymap("n", "R", function() rerun_query(buf_state) end,
+    { desc = "Re-run the query", silent = true })
   buf:set_keymap("n", "e", function() export_results(buf_state) end,
     { desc = "Export results", silent = true })
   buf:set_keymap("n", config.options.keymaps.hover_key, function()
@@ -1045,14 +1085,19 @@ function M.show_loading(msg)
   reset_cursor()
 end
 
---- Store the SQL and filetype on the active buf_state for the "source query" float.
---- @param sql      string
---- @param filetype string
-function M.set_query(sql, filetype)
+--- Store the SQL and filetype on the active buf_state for the "source query"
+--- float, and where it came from for `R` (re-run).
+--- @param sql        string
+--- @param filetype   string
+--- @param src_bufnr  integer|nil  source buffer the query was run from
+--- @param first_line integer|nil  0-indexed first line of `sql` in `src_bufnr`
+function M.set_query(sql, filetype, src_bufnr, first_line)
   local buf_state = active_buf_state()
   if buf_state then
-    buf_state.query    = sql
-    buf_state.query_ft = filetype
+    buf_state.query      = sql
+    buf_state.query_ft   = filetype
+    buf_state.src_bufnr  = src_bufnr
+    buf_state.first_line = first_line
   end
 end
 
@@ -1072,6 +1117,8 @@ function M.set_conn_name(key, driver_label, src_bufnr)
   buf_state.column_cache  = nil
   buf_state.query         = nil  -- set_query follows for a run query; a preview has none
   buf_state.query_ft      = nil
+  buf_state.src_bufnr     = nil
+  buf_state.first_line    = nil
   state.active_src = buf_key
 end
 

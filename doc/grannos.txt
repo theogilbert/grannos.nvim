@@ -433,6 +433,8 @@ KEYMAPS ~
   [       Go to the previous page of results.
   ]       Go to the next page of results.
   gh      Toggle the documents-over-time histogram, see |grannos-histogram|.
+  R       Re-run the query that produced the results, against the same
+          connection, and show the new results here.
   q       Close the results window.
   g?      Show a keymap reference float.
 

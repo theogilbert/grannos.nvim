@@ -156,6 +156,7 @@ Results appear in a split window with aligned columns and a row count. For DML q
 | `H` / `L` | Scroll left / right one column |
 | `c` | Select which columns to display |
 | `[` / `]` | Previous / next page |
+| `R` | Re-run the query that produced the results |
 | `q` | Close the results window |
 | `g?` | Show keymap reference |
 

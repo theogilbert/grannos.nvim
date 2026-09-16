@@ -220,7 +220,7 @@ function M.run(conn, query, bufnr, first_line)
 
     results.set_conn_name(conn.key, conn.driver_label, bufnr)
     local ft = (bufnr and vim.api.nvim_buf_is_valid(bufnr)) and vim.bo[bufnr].filetype or ""
-    results.set_query(query, ft)
+    results.set_query(query, ft, bufnr, first_line)
 
     local queries
     if not is_mongo(conn.driver) and bufnr and first_line ~= nil then

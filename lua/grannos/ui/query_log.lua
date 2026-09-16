@@ -286,6 +286,8 @@ function M.open(conn_key, conn)
 
       local results_ui = require("grannos.ui.results")
       results_ui.set_conn_name(conn_key, conn and conn.driver_label, entry.bufnr)
+      local ft = (entry.bufnr and vim.api.nvim_buf_is_valid(entry.bufnr)) and vim.bo[entry.bufnr].filetype or ""
+      results_ui.set_query(entry.sql, ft, entry.bufnr, entry.source_line)
       if entry.status == "success" then
         -- Opening an entry (as opposed to browsing it) needs the full result
         -- set; this lazily reads the spillover file for truncated entries.
