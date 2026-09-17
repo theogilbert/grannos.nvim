@@ -32,9 +32,14 @@ end
 --- Resolve a source's query-text path to a full explore-tree path.
 ---
 --- A query naming a table without its schema (`FROM users`) doesn't say where
---- the table lives, so on a driver with schemas the already-listed schemas are
---- searched for it. An unambiguous single hit wins; anything else yields nil
---- rather than a guess, and the position simply offers nothing.
+--- the table lives, so on a driver with schemas the schemas are searched for
+--- it. An unambiguous single hit wins; anything else yields nil rather than a
+--- guess, and the position simply offers nothing.
+---
+--- The search lists every schema, so it is bounded by `max_schema_scan` as
+--- the unqualified table sweep is: past the bound an unqualified table is not
+--- resolved — qualifying it (`schema.table`) lists just the one — because one
+--- keystroke must never turn into a listing per schema.
 --- @param conn_id  any
 --- @param path     string[]  1 or 2 parts, as written in the query
 --- @param on_ready fun()|nil
@@ -44,8 +49,11 @@ local function resolve_table_path(conn_id, path, on_ready)
   if has_schemas == nil then return nil end
   if #path >= 2 or not has_schemas then return path end
 
+  local root = cache.children(conn_id, {}, on_ready) or {}
+  if #root > config.options.completion.max_schema_scan then return nil end
+
   local wanted, found = path[1]:lower(), nil
-  for _, schema in ipairs(cache.children(conn_id, {}, on_ready) or {}) do
+  for _, schema in ipairs(root) do
     for _, item in ipairs(cache.children(conn_id, { schema.name }, on_ready) or {}) do
       if item.name:lower() == wanted then
         if found then return nil end  -- same table name in two schemas

@@ -3,7 +3,12 @@
 -- Left panel:  available (unselected) columns.
 -- Right panel: selected columns (in display order).
 -- j/k navigate within the focused panel; h/l switch panels.
--- Tab/Enter/Space move the item under the cursor to the other panel.
+-- Tab/Enter/Space move the item under the cursor to the other panel — or,
+--     when items in the focused panel are marked or a range is active, every
+--     one of those at once.
+-- m   mark/unmark the item under the cursor and step down, so a run of `m`
+--     picks out a scattered set; M clears every mark.
+-- v/V start a range at the cursor, extended by j/k, dropped by v again or Esc.
 -- K/J (right panel only) move the item under the cursor up/down.
 -- >   move all available columns to selected (only the matches, when filtering).
 -- <   move all selected columns back to available.
@@ -48,16 +53,53 @@ local function shown_available()
   return vim.fn.matchfuzzy(p.available, p.filter)
 end
 
+--- The list the focused panel shows.
+--- @return string[]
+local function focused_list()
+  return p.side == "left" and shown_available() or p.selected
+end
+
+--- Whether item `i` of the focused panel is inside the active range.
+--- @param i integer
+--- @return boolean
+local function in_range(i)
+  if not p.anchor then return false end
+  return i >= math.min(p.anchor, p.cursor) and i <= math.max(p.anchor, p.cursor)
+end
+
+--- The number of marked columns.
+--- @return integer
+local function mark_count()
+  local n = 0
+  for _ in pairs(p.marks) do n = n + 1 end
+  return n
+end
+
+--- The columns a toggle acts on, in panel order: the active range, else the
+--- marked items of the focused panel, else the item under the cursor alone.
+--- @return string[]
+local function targets()
+  local list = focused_list()
+  local out = {}
+  for i, col in ipairs(list) do
+    if in_range(i) or (not p.anchor and p.marks[col]) then out[#out + 1] = col end
+  end
+  if #out == 0 and list[p.cursor] then out[1] = list[p.cursor] end
+  return out
+end
+
 --- The window title: the picker's name, plus the filter being typed or in
 --- force. The title rather than a buffer line, so it stays in view however
 --- far a long column list scrolls.
 --- @return string
 local function title()
   if p.filter_editing then return (" Columns  /%s▏ "):format(p.filter or "") end
+  local marked = mark_count()
+  local suffix = marked > 0 and ("  %d marked "):format(marked) or " "
   if p.filter and p.filter ~= "" then
-    return (" Columns  /%s  %d of %d "):format(p.filter, #shown_available(), #p.available)
+    return (" Columns  /%s  %d of %d%s"):format(p.filter, #shown_available(), #p.available, suffix)
   end
-  return " Columns "
+  return " Columns" .. suffix
 end
 
 --- Redraw the picker buffer from the current picker state.
@@ -75,12 +117,18 @@ local function render()
   -- Item rows — pad both sides so every line is exactly cw+SEP_LEN+cw bytes.
   -- At least enough rows to fill the window, so the divider runs to its
   -- bottom edge when a filter or a lopsided split leaves a panel short.
+  -- A marked item, or one inside the active range, carries a bullet.
   local available = shown_available()
   local n = math.max(#available, #p.selected, 1, (p.height or 2) - 2)
+  local picked = {}  -- { [lnum] = { left = bool, right = bool } }
   for i = 1, n do
-    local ltext = available[i] and ("  " .. available[i]) or ""
-    local rtext = p.selected[i] and ("  " .. p.selected[i]) or ""
+    local lcol, rcol = available[i], p.selected[i]
+    local lpick = lcol and (p.marks[lcol] or (p.side == "left" and in_range(i))) or false
+    local rpick = rcol and (p.marks[rcol] or (p.side == "right" and in_range(i))) or false
+    local ltext = lcol and ((lpick and "• " or "  ") .. lcol) or ""
+    local rtext = rcol and ((rpick and "• " or "  ") .. rcol) or ""
     table.insert(lines, pad(ltext, cw) .. SEP .. pad(rtext, cw))
+    picked[i + 1] = { left = lpick, right = rpick }
   end
   vim.api.nvim_buf_set_lines(p.buf, 0, -1, false, lines)
 
@@ -92,14 +140,26 @@ local function render()
   vim.api.nvim_buf_set_extmark(p.buf, ns_id, 0, cw + SEP_LEN,
     { end_col = cw + SEP_LEN + cw, hl_group = "GrannosHeaderRow" })
 
-  -- Cursor highlight (0-indexed: header=0, sep-row=1, items start at 2)
+  -- Marked and ranged rows (0-indexed: header=0, sep-row=1, items start at 2)
+  for lnum, pick in pairs(picked) do
+    if pick.left then
+      vim.api.nvim_buf_set_extmark(p.buf, ns_id, lnum, 0,
+        { end_col = cw, hl_group = "Visual", priority = 50 })
+    end
+    if pick.right then
+      vim.api.nvim_buf_set_extmark(p.buf, ns_id, lnum, cw + SEP_LEN,
+        { end_col = cw + SEP_LEN + cw, hl_group = "Visual", priority = 50 })
+    end
+  end
+
+  -- Cursor highlight, above any mark
   local item_lnum = p.cursor + 1
   if p.side == "left" and available[p.cursor] then
     vim.api.nvim_buf_set_extmark(p.buf, ns_id, item_lnum, 0,
-      { end_col = cw, hl_group = "PmenuSel" })
+      { end_col = cw, hl_group = "PmenuSel", priority = 100 })
   elseif p.side == "right" and p.selected[p.cursor] then
     vim.api.nvim_buf_set_extmark(p.buf, ns_id, item_lnum, cw + SEP_LEN,
-      { end_col = cw + SEP_LEN + cw, hl_group = "PmenuSel" })
+      { end_col = cw + SEP_LEN + cw, hl_group = "PmenuSel", priority = 100 })
   end
 
   -- Keep the Neovim cursor on the highlighted item so the window auto-scrolls.
@@ -126,14 +186,17 @@ local function push_history()
 end
 
 --- Make `snap` the current selection, keeping the cursor on a valid item.
+--- Marks and the range are dropped: they were made against a selection
+--- that is no longer the one shown.
 --- @param snap { available: string[], selected: string[] }
 local function restore(snap)
   p.available = vim.list_extend({}, snap.available)
   p.selected  = vim.list_extend({}, snap.selected)
-  local list  = p.side == "left" and shown_available() or p.selected
+  p.marks, p.anchor = {}, nil
+  local list  = focused_list()
   if #list == 0 then
     p.side = p.side == "left" and "right" or "left"
-    list   = p.side == "left" and shown_available() or p.selected
+    list   = focused_list()
   end
   p.cursor = math.max(1, math.min(p.cursor, #list))
   render()
@@ -189,6 +252,7 @@ local function reset()
   push_history()
   p.available = vim.list_extend({}, p.init_available)
   p.selected  = vim.list_extend({}, p.init_selected)
+  p.marks, p.anchor = {}, nil
   p.side      = #p.init_available > 0 and "left" or "right"
   p.cursor    = 1
   render()
@@ -207,6 +271,7 @@ local function select_all()
     moved[col] = true
   end
   p.available = vim.tbl_filter(function(c) return not moved[c] end, p.available)
+  p.marks, p.anchor = {}, nil
   p.side      = "right"
   p.cursor    = math.min(p.cursor, math.max(#p.selected, 1))
   render()
@@ -221,36 +286,65 @@ local function deselect_all()
     insert_sorted_available(col)
   end
   p.selected = {}
+  p.marks, p.anchor = {}, nil
   p.side     = "left"
   p.cursor   = math.min(p.cursor, math.max(#p.available, 1))
   render()
   if p.on_change then p.on_change({}) end
 end
 
---- Move the item under the cursor between available and selected.
-local function move_item()
+--- Move `cols` — items of the focused panel, in panel order — to the other
+--- panel. Their marks go with them: once moved they are done with.
+--- @param cols string[]
+local function move_items(cols)
+  if #cols == 0 then return end
+  push_history()
+  local moving = {}
+  for _, col in ipairs(cols) do moving[col] = true; p.marks[col] = nil end
+  p.anchor = nil
   if p.side == "left" then
-    local col = shown_available()[p.cursor]
-    if not col then return end
-    push_history()
-    for i, c in ipairs(p.available) do
-      if c == col then table.remove(p.available, i); break end
-    end
-    table.insert(p.selected, col)
+    p.available = vim.tbl_filter(function(c) return not moving[c] end, p.available)
+    vim.list_extend(p.selected, cols)
     local left = #shown_available()
     p.cursor = math.min(p.cursor, math.max(left, 1))
     if left == 0 then p.side = "right"; p.cursor = #p.selected end
   else
-    local col = p.selected[p.cursor]
-    if not col then return end
-    push_history()
-    table.remove(p.selected, p.cursor)
-    insert_sorted_available(col)
+    p.selected = vim.tbl_filter(function(c) return not moving[c] end, p.selected)
+    for _, col in ipairs(cols) do insert_sorted_available(col) end
     p.cursor = math.min(p.cursor, math.max(#p.selected, 1))
     if #p.selected == 0 then p.side = "left"; p.cursor = 1 end
   end
   render()
   if p.on_change then p.on_change(vim.list_extend({}, p.selected)) end
+end
+
+--- Move the range, the marked items, or the item under the cursor to the
+--- other panel.
+local function move_item()
+  move_items(targets())
+end
+
+--- Mark or unmark the item under the cursor and step to the next one, so
+--- a run of `m` picks out a scattered set.
+local function toggle_mark()
+  local list = focused_list()
+  local col  = list[p.cursor]
+  if not col then return end
+  p.marks[col] = not p.marks[col] or nil
+  p.cursor = math.min(p.cursor + 1, #list)
+  render()
+end
+
+--- Drop every mark.
+local function clear_marks()
+  p.marks = {}
+  render()
+end
+
+--- Start a range at the cursor, or drop the one in progress.
+local function toggle_range()
+  p.anchor = not p.anchor and p.cursor or nil
+  render()
 end
 
 --- Open the column picker.
@@ -300,6 +394,8 @@ function M.open(all_cols, vis_cols, on_change)
     redo           = {},
     filter         = nil,
     filter_editing = false,
+    marks          = {},   -- { [column] = true }
+    anchor         = nil,  -- range start in the focused panel, while one is active
   }
 
   render()
@@ -382,6 +478,7 @@ function M.open(all_cols, vis_cols, on_change)
     p.filter = ""
     p.side   = "left"
     p.cursor = 1
+    p.anchor = nil
     -- Keys are matched by their |keytrans()| name, so a special key arrives
     -- as "<Down>" whatever bytes the terminal sent, and only a key with no
     -- such name — a plain character — is ever typed into the filter. An
@@ -403,8 +500,9 @@ function M.open(all_cols, vis_cols, on_change)
         if p.filter == "" then p.filter = nil end
         break
       elseif key == "<Tab>" then
-        if shown_available()[p.cursor] then
-          move_item()
+        local match = shown_available()[p.cursor]
+        if match then
+          move_items({ match })
           p.filter = ""
           p.side   = "left"
           p.cursor = 1
@@ -430,9 +528,13 @@ function M.open(all_cols, vis_cols, on_change)
     render()
   end
 
-  --- Esc: drop the filter when one is on; otherwise close.
+  --- Esc: drop the range in progress, else the filter when one is on;
+  --- otherwise close.
   local function esc()
-    if p.filter then
+    if p.anchor then
+      p.anchor = nil
+      render()
+    elseif p.filter then
       p.filter = nil
       p.cursor = 1
       render()
@@ -443,21 +545,23 @@ function M.open(all_cols, vis_cols, on_change)
 
   --- Move cursor to the next item in the focused panel.
   local function nav_down()
-    local list = p.side == "left" and shown_available() or p.selected
-    p.cursor   = math.min(p.cursor + 1, math.max(#list, 1))
+    p.cursor = math.min(p.cursor + 1, math.max(#focused_list(), 1))
     render()
   end
   --- Move cursor to the previous item in the focused panel.
   local function nav_up()   p.cursor = math.max(1, p.cursor - 1); render() end
-  --- Switch focus to the available (left) panel.
+  --- Switch focus to the available (left) panel. A range belongs to the
+  --- panel it was started in, so switching drops it.
   local function nav_left()
     p.side   = "left"
+    p.anchor = nil
     p.cursor = math.min(p.cursor, math.max(#shown_available(), 1))
     render()
   end
   --- Switch focus to the selected (right) panel.
   local function nav_right()
     p.side   = "right"
+    p.anchor = nil
     p.cursor = math.min(p.cursor, math.max(#p.selected, 1))
     render()
   end
@@ -472,9 +576,13 @@ function M.open(all_cols, vis_cols, on_change)
   map("<Left>",  nav_left,   "")
   map("l",       nav_right,  "Focus selected panel")
   map("<Right>", nav_right,  "")
-  map("<Tab>",   move_item,  "Toggle column")
+  map("<Tab>",   move_item,  "Toggle column (or the marked ones, or the range)")
   map("<CR>",    move_item,  "")
   map("<Space>", move_item,  "")
+  map("m",       toggle_mark,  "Mark/unmark column")
+  map("M",       clear_marks,  "Clear marks")
+  map("v",       toggle_range, "Start/stop a range")
+  map("V",       toggle_range, "")
   map("K",       function() reorder(-1) end, "Move column up")
   map("J",       function() reorder(1)  end, "Move column down")
   map(">",       select_all,   "Select all")

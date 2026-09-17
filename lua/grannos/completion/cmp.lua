@@ -78,6 +78,15 @@ end
 --- to come back rather than cache a half-answer. The re-request is not left to
 --- the user's next keystroke: the arrival itself asks cmp to complete again, so
 --- a menu opened on a cold cache fills in on its own.
+---
+--- The re-request fires at most once per call here, however many listings
+--- this call left in flight, as `completion._refiller` does for omnifunc. It
+--- has to: each re-request registers afresh on every listing still pending,
+--- so if every landing fired every callback ever registered, the n-th landing
+--- would fire 2^n of them — and a position that lists one path per schema
+--- (an unqualified table on a server with dozens) would pin Neovim in
+--- re-parses until the backend was killed. One re-request per landing, each
+--- re-armed by the next call, refills the menu just the same.
 --- @param params   table  cmp completion params
 --- @param callback fun(response: table)
 function source:complete(params, callback)
@@ -89,8 +98,11 @@ function source:complete(params, callback)
   end
 
   local row, col = unpack(vim.api.nvim_win_get_cursor(0))
+  local fired = false
   -- No `base`: cmp filters and ranks the list itself.
   local raw = completion.candidates_at(bufnr, row - 1, col, "", function()
+    if fired then return end
+    fired = true
     -- Ask cmp for a fresh cycle, but only while the cursor still sits where
     -- this request was made — otherwise the user has moved on.
     vim.schedule(function()

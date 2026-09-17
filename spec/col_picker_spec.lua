@@ -95,6 +95,74 @@ describe("ui.col_picker", function()
     end)
   end)
 
+  describe("marks", function()
+    it("m marks columns and Tab moves every marked one at once", function()
+      local out = open({})
+      feed("mjm")             -- id, email (m steps down: id, then skip name, then email)
+      assert.equal(" Columns  2 marked ", title())
+      assert.same({ "• id", "name", "• email", "created_at", "updated_at" }, available_shown())
+      feed("<Tab>")
+      assert.same({ "id", "email" }, out.last)
+      assert.equal(1, out.calls)
+      assert.equal(" Columns ", title())
+      assert.same({ "name", "created_at", "updated_at" }, available_shown())
+    end)
+
+    it("m again unmarks, and M clears every mark", function()
+      local out = open({})
+      feed("mkm")             -- mark id, back up, unmark it
+      assert.equal(" Columns ", title())
+      feed("mmM")             -- mark name and email, then clear; cursor on created_at
+      assert.equal(" Columns ", title())
+      feed("<Tab>")           -- nothing marked: the cursor's item alone
+      assert.same({ "created_at" }, out.last)
+    end)
+
+    it("marks on the selected panel move those columns back", function()
+      local out = open({ "id", "name", "email" })
+      feed("lmjm<Tab>")       -- selected panel: mark id and email
+      assert.same({ "name" }, out.last)
+      assert.same({ "id", "email", "created_at", "updated_at" }, available_shown())
+    end)
+
+    it("v starts a range that j extends and Tab moves", function()
+      local out = open({})
+      feed("jvjj<Tab>")       -- name..created_at
+      assert.same({ "name", "email", "created_at" }, out.last)
+      assert.same({ "id", "updated_at" }, available_shown())
+    end)
+
+    it("a range runs either way from its anchor", function()
+      local out = open({})
+      feed("jjjvkk<Tab>")     -- created_at back to name
+      assert.same({ "name", "email", "created_at" }, out.last)
+    end)
+
+    it("Esc drops the range before the filter, and v again drops it too", function()
+      local out = open({})
+      feed("vj<Esc><Tab>")    -- range dropped: name alone moves; cursor lands on email
+      assert.same({ "name" }, out.last)
+      feed("vjv<Tab>")        -- range email..created_at dropped: created_at alone moves
+      assert.same({ "name", "created_at" }, out.last)
+      assert.is_true(vim.api.nvim_win_get_config(0).relative ~= "")
+    end)
+
+    it("moves marked columns in one undoable step", function()
+      local out = open({})
+      feed("mmm<Tab>")
+      assert.same({ "id", "name", "email" }, out.last)
+      feed("u")
+      assert.same({}, out.last)
+    end)
+
+    it("a filter's Tab picks the highlighted match, marks or not", function()
+      local out = open({})
+      feed("m/nam<Tab><Esc>")
+      assert.same({ "name" }, out.last)
+      assert.same({ "• id", "email", "created_at", "updated_at" }, available_shown())
+    end)
+  end)
+
   describe("filter", function()
     it("narrows the available panel and shows the match count in the title", function()
       open({})
