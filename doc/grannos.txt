@@ -457,7 +457,9 @@ KEYMAPS ~
           instead of replacing them. The pinned buffer is renamed with a
           pin number (`grannos://results [...] (pin 1)`), stays listed,
           and every key still works on its own results: `R` re-runs its
-          query into it, `q` closes it.
+          query into it, `q` closes it. `p` on a pinned pane unpins it:
+          the next result from its buffer shows there again, and a pane
+          that had taken its place is pinned instead, keeping its result.
   q       Close the results window.
   g?      Show a keymap reference float.
 

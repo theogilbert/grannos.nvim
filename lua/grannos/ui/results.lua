@@ -520,38 +520,79 @@ local function rerun_query(buf_state)
   require("grannos.executor").run(conn, buf_state.query, src_bufnr, first_line)
 end
 
---- Pin the pane: move its buf_state out of the (source buffer, connection)
---- slot so the next query from that source is shown in a fresh buffer and
---- window, leaving this one untouched beside it. The buffer is renamed with a
---- pin number so it stays listed and distinguishable; every key in it still
---- works on its own results (`R` re-runs into it, `q` closes it). A query
---- still in flight for this pane lands here, since it is that query's result.
+--- Return the `state.buffers` key `buf_state` is stored under, or nil.
 --- @param buf_state table
-local function pin_pane(buf_state)
-  if buf_state.pinned then
-    vim.notify("grannos: already pinned — q closes it", vim.log.levels.INFO)
-    return
-  end
-  local old_key
+--- @return string|nil
+local function key_of(buf_state)
   for key, bs in pairs(state.buffers) do
-    if bs == buf_state then old_key = key; break end
+    if bs == buf_state then return key end
   end
-  if not old_key then return end
+  return nil
+end
+
+--- Move `buf_state` out of the (source buffer, connection) slot `slot_key`
+--- into a pin slot of its own, rename its buffer with the pin number, and
+--- stop its window being the tab's target for the next result.
+--- @param buf_state table
+--- @param slot_key  string  the key it leaves — kept so `unpin_pane` can go back
+local function detach(buf_state, slot_key)
   state.pins = state.pins + 1
-  local new_key = old_key .. "\0pin" .. state.pins
-  state.buffers[old_key] = nil
-  state.buffers[new_key] = buf_state
-  if state.active_src == old_key then state.active_src = new_key end
-  buf_state.pinned = true
+  local pin_key = slot_key .. "\0pin" .. state.pins
+  state.buffers[slot_key] = nil
+  state.buffers[pin_key]  = buf_state
+  if state.active_src == slot_key then state.active_src = pin_key end
+  buf_state.pinned   = true
+  buf_state.slot_key = slot_key
+  buf_state.slot_name = vim.api.nvim_buf_get_name(buf_state.buffer.buf_id)
   pcall(vim.api.nvim_buf_set_name, buf_state.buffer.buf_id,
-    vim.api.nvim_buf_get_name(buf_state.buffer.buf_id) .. (" (pin %d)"):format(state.pins))
-  -- The window is no longer the tab's target for the next result.
+    buf_state.slot_name .. (" (pin %d)"):format(state.pins))
   for tab, win_id in pairs(state.win_ids) do
     if vim.api.nvim_win_is_valid(win_id)
       and vim.api.nvim_win_get_buf(win_id) == buf_state.buffer.buf_id then
       state.win_ids[tab] = nil
     end
   end
+end
+
+--- Unpin the pane: put its buf_state back in the (source buffer, connection)
+--- slot it was pinned out of, so the next query from that source lands here
+--- again, and make its window the tab's target. A pane that took the slot
+--- meanwhile is pinned in its place — its result stays beside this one —
+--- since one pane per slot is the live target and every other one is pinned.
+--- @param buf_state table
+local function unpin_pane(buf_state)
+  local pin_key = key_of(buf_state)
+  local slot    = buf_state.slot_key
+  if not pin_key or not slot then return end
+  local other = state.buffers[slot]
+  if other and other ~= buf_state then detach(other, slot) end
+  state.buffers[pin_key] = nil
+  state.buffers[slot]    = buf_state
+  if state.active_src == pin_key then state.active_src = slot end
+  buf_state.pinned = false
+  pcall(vim.api.nvim_buf_set_name, buf_state.buffer.buf_id, buf_state.slot_name)
+  buf_state.slot_key, buf_state.slot_name = nil, nil
+  local win = win_showing(buf_state.buffer.buf_id)
+  if win then state.win_ids[vim.api.nvim_get_current_tabpage()] = win end
+  vim.notify("grannos: unpinned — the next result shows here", vim.log.levels.INFO)
+end
+
+--- Pin the pane: move its buf_state out of the (source buffer, connection)
+--- slot so the next query from that source is shown in a fresh buffer and
+--- window, leaving this one untouched beside it. The buffer is renamed with a
+--- pin number so it stays listed and distinguishable; every key in it still
+--- works on its own results (`R` re-runs into it, `q` closes it). A query
+--- still in flight for this pane lands here, since it is that query's result.
+--- On a pane already pinned, `p` unpins it instead.
+--- @param buf_state table
+local function pin_pane(buf_state)
+  if buf_state.pinned then
+    unpin_pane(buf_state)
+    return
+  end
+  local slot = key_of(buf_state)
+  if not slot then return end
+  detach(buf_state, slot)
 end
 
 --- Open `content` in a new unnamed, listed buffer in a vertical split of the results
@@ -809,7 +850,7 @@ local function get_or_create_buf_state(buf_key, buf_title)
   buf:set_keymap("n", "R", function() rerun_query(buf_state) end,
     { desc = "Re-run the query", silent = true })
   buf:set_keymap("n", "p", function() pin_pane(buf_state) end,
-    { desc = "Pin: keep this pane, show the next result beside it", silent = true })
+    { desc = "Pin: keep this pane, show the next result beside it (again: unpin)", silent = true })
   buf:set_keymap("n", "s", function()
     if not buf_state.conn_key then
       vim.notify("grannos: no connection for these results", vim.log.levels.WARN)

@@ -102,6 +102,46 @@ describe("results p pins the pane", function()
     assert.same({ first = true, third = true }, seen)
   end)
 
+  it("p again unpins: the next result shows in the pane once more", function()
+    show(src, "first")
+    local win = results_wins()[1]
+    local buf = vim.api.nvim_win_get_buf(win)
+    vim.api.nvim_set_current_win(win)
+    vim.api.nvim_feedkeys("p", "x", false)
+    assert.truthy(vim.api.nvim_buf_get_name(buf):find("(pin ", 1, true))
+    vim.api.nvim_feedkeys("p", "x", false)
+    assert.is_nil(vim.api.nvim_buf_get_name(buf):find("(pin", 1, true))
+    vim.api.nvim_set_current_win(vim.fn.bufwinid(src))
+    show(src, "second")
+    assert.equals(1, #results_wins())
+    assert.equals(buf, vim.api.nvim_win_get_buf(results_wins()[1]))
+    assert.is_true(shows(buf, "second"))
+  end)
+
+  it("unpinning pins the pane that took its place, keeping that result", function()
+    show(src, "first")
+    local first_win = results_wins()[1]
+    local first_buf = vim.api.nvim_win_get_buf(first_win)
+    vim.api.nvim_set_current_win(first_win)
+    vim.api.nvim_feedkeys("p", "x", false)
+    vim.api.nvim_set_current_win(vim.fn.bufwinid(src))
+    show(src, "second")
+    local second_buf
+    for _, w in ipairs(results_wins()) do
+      local b = vim.api.nvim_win_get_buf(w)
+      if b ~= first_buf then second_buf = b end
+    end
+    vim.api.nvim_set_current_win(first_win)
+    vim.api.nvim_feedkeys("p", "x", false)   -- unpin the first
+    assert.truthy(vim.api.nvim_buf_get_name(second_buf):find("(pin ", 1, true))
+    vim.api.nvim_set_current_win(vim.fn.bufwinid(src))
+    show(src, "third")
+    assert.equals(2, #results_wins())
+    assert.is_true(shows(first_buf, "third"))
+    assert.is_false(shows(first_buf, "first"))
+    assert.is_true(shows(second_buf, "second"))
+  end)
+
   it("pinning twice from the same source numbers the pins", function()
     show(src, "first")
     vim.api.nvim_set_current_win(results_wins()[1])
