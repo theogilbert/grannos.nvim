@@ -693,7 +693,7 @@ hide_column_at_cursor = function(buf_state)
   local col_name = col_idx and buf_state.vis_columns[col_idx]
   if not col_name then return end
   table.remove(buf_state.vis_columns, col_idx)
-  col_selection.save(buf_state.raw_columns, buf_state.vis_columns)
+  col_selection.save(buf_state.conn_key, buf_state.raw_columns, buf_state.vis_columns)
   render_table(buf_state)
 end
 
@@ -784,7 +784,7 @@ local function get_or_create_buf_state(buf_key, buf_title)
     if not buf_state.raw_columns then return end
     col_picker.open(buf_state.raw_columns, buf_state.vis_columns, function(sel)
       buf_state.vis_columns = sel
-      col_selection.save(buf_state.raw_columns, sel)
+      col_selection.save(buf_state.conn_key, buf_state.raw_columns, sel)
       render_table(buf_state)
     end)
   end, { desc = "Select displayed columns", silent = true })
@@ -1369,10 +1369,10 @@ function M.show_results(columns, rows, rows_returned, rows_total, duration_ms, m
   local buf_state = active_buf_state()
   stop_loading(buf_state)
   if not buf_state.raw_columns or not same_columns(buf_state.raw_columns, columns) then
-    -- What this project remembers outranks the default of showing everything:
-    -- a selection saved for this exact column list, or failing that the columns
-    -- hidden anywhere in the project. Neither, and everything shows.
-    buf_state.vis_columns = col_selection.load(columns) or vim.list_extend({}, columns)
+    -- The selection last made on this connection outranks the default of
+    -- showing everything: its columns first, in its order, then whatever else
+    -- this result has, less what it hid. Nothing remembered, and everything shows.
+    buf_state.vis_columns = col_selection.load(buf_state.conn_key, columns) or vim.list_extend({}, columns)
   end
   buf_state.raw_columns    = columns
   buf_state.raw_rows       = rows

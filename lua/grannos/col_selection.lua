@@ -1,75 +1,99 @@
--- Persisted results-pane column selections, scoped to a project.
+-- Persisted results-pane column selections, one per connection: the last
+-- selection made on it.
 --
--- Storage: one JSON file per project under
---   $XDG_DATA_HOME/grannos/col_selections/{sha256(project)[:16]}.json
+-- Storage: a single JSON file, $XDG_DATA_HOME/grannos/col_selections.json,
+-- nested like connections.json — [server][driver][group][name] = entry — so
+-- entries follow the same identity as the connection they belong to, and are
+-- deleted, renamed and regrouped with it. An entry holds the visible column
+-- names in display order and the names that were hidden:
 --
--- "Project" is the working directory (the global one, so a window-local :lcd
--- does not silently split a project in two). Two checkouts of the same schema
--- therefore keep separate selections, which is the point: hiding a column is a
--- statement about the work at hand, not about the database.
+--   { "visible": ["name", "id"], "hidden": ["created_at"] }
 --
--- A store holds two things, consulted in that order:
+-- Applied to the next result on that connection, whatever its columns: the
+-- names in `visible` come first, in that order, then the result's remaining
+-- columns in their own order, less any in `hidden`. The same query therefore
+-- comes back exactly as it was left; an edited one keeps the choice and
+-- appends what is new; an unrelated one, sharing no names, shows everything.
 --
---   selections  keyed by the result's column list, so the same query — or any
---               query returning the same columns in the same order — comes back
---               with exactly the columns, in the order, the user chose for it.
---               The column names are stored alongside the key so the file stays
---               readable and a stale entry can be filtered on load.
---   hidden      the names the user has hidden anywhere in this project. Applied
---               to any result the selections table has never seen: those columns
---               are dropped, everything else keeps the result's own order.
---
--- The hidden set is what makes the memory survive an edit to the query. Keying
--- only on the column list means adding a column, reordering one, or aliasing it
--- differently starts over from "show everything"; a name the user hid stays
--- hidden across all of that. It self-heals for free, too: a hidden name that a
--- result does not have simply never applies, so nothing has to be reset.
---
--- The cost is that hiding is by name: hide `tenant_id` once and it is gone from
--- every result in the project that has one. Showing it again anywhere brings it
--- back everywhere, which is the same statement in reverse.
---
--- A selection identical to the full column list is not a customisation: it is
--- deleted rather than stored, so the file only ever holds real choices.
+-- Every save replaces the entry — it is the previous selection that is
+-- remembered, not an accumulation — and selecting every column again in its
+-- own order deletes it, since that is no selection at all. These are
+-- preferences: a missing or unreadable file is an empty store.
 local M = {}
 
---- Maximum stored selections per project; the least recently saved are dropped.
-local MAX_ENTRIES = 200
+local connections = require("grannos.connections")
 
---- Storage root override. `nil` means the XDG default. Tests set this.
+--- Override for the storage file path (tests point this at a temp file).
 --- @type string|nil
-M.root = nil
+M.file = nil
 
--- [project] = { cwd = string, selections = { [key] = entry }, hidden = { [name] = true } }
-local cache = {}
+--- In-memory copy of the store, read from disk once per session.
+--- @type table|nil
+local cache = nil
 
---- Return the storage root directory for per-project selection files.
+--- Return the path of the JSON store file.
 --- @return string
-local function root()
-  if M.root then return M.root end
+local function file_path()
+  if M.file then return M.file end
   local xdg = vim.env.XDG_DATA_HOME or vim.fn.expand("~/.local/share")
-  return xdg .. "/grannos/col_selections"
+  return xdg .. "/grannos/col_selections.json"
 end
 
---- Return the current project: the global working directory, without a trailing slash.
---- @return string
-local function project()
-  local cwd = vim.fn.fnamemodify(vim.fn.getcwd(-1, -1), ":p")
-  return (cwd:gsub("/+$", ""))
+--- Read the store from disk (once per session) and cache it.
+--- @return table
+local function load_store()
+  if cache then return cache end
+  cache = {}
+  local f = io.open(file_path(), "r")
+  if f then
+    local content = f:read("*a")
+    f:close()
+    local ok, decoded = pcall(vim.json.decode, content)
+    if ok and type(decoded) == "table" then cache = decoded end
+  end
+  return cache
 end
 
---- Return the JSON file path holding `proj`'s selections.
---- @param proj string
---- @return string
-local function file_for(proj)
-  return root() .. "/" .. vim.fn.sha256(proj):sub(1, 16) .. ".json"
+--- Write the cached store to disk, creating its directory if needed.
+local function write_store()
+  local path = file_path()
+  vim.fn.mkdir(vim.fn.fnamemodify(path, ":h"), "p")
+  local f = io.open(path, "w")
+  if not f then return end
+  f:write(vim.json.encode(load_store()))
+  f:close()
 end
 
---- Return the storage key for a result's column list.
---- @param columns string[]
---- @return string
-local function key_for(columns)
-  return vim.fn.sha256(table.concat(columns, "\0"))
+--- Return the group table holding `key`'s entry, creating intermediate
+--- levels when `create` is set. Nil when absent and not creating.
+--- @param key    string   composite connection key
+--- @param create boolean
+--- @return table|nil group  { [name] = entry }
+--- @return string   name
+local function group_for(key, create)
+  local server, driver, group, name = connections.conn_parts(key)
+  local node = load_store()
+  for _, seg in ipairs({ server, driver, group }) do
+    local child = node[seg]
+    if type(child) ~= "table" then
+      if not create then return nil, name end
+      child = {}
+      node[seg] = child
+    end
+    node = child
+  end
+  return node, name
+end
+
+--- Return the entry saved for `key`, or nil.
+--- @param key string
+--- @return { visible: string[], hidden: string[] }|nil
+local function entry_for(key)
+  local g, name = group_for(key, false)
+  local entry = g and g[name]
+  if type(entry) ~= "table" or type(entry.visible) ~= "table" then return nil end
+  if type(entry.hidden) ~= "table" then entry.hidden = {} end
+  return entry
 end
 
 --- Return true when both lists hold the same strings in the same order.
@@ -82,166 +106,105 @@ local function same_list(a, b)
   return true
 end
 
---- Read `proj`'s store from disk (once per project per session) and cache it.
---- A missing or unparsable file yields an empty store rather than an error:
---- these are preferences, and losing them costs nothing but convenience.
---- `hidden` is a sorted array on disk and a name-keyed set in memory.
---- @param proj string
---- @return { cwd: string, selections: table<string, table>, hidden: table<string, boolean> }
-local function load_store(proj)
-  if cache[proj] then return cache[proj] end
-
-  local store = { cwd = proj, selections = {}, hidden = {} }
-  local f = io.open(file_for(proj), "r")
-  if f then
-    local content = f:read("*a")
-    f:close()
-    local ok, decoded = pcall(vim.json.decode, content)
-    if ok and type(decoded) == "table" and type(decoded.selections) == "table" then
-      store.selections = decoded.selections
-      if type(decoded.hidden) == "table" then
-        for _, name in ipairs(decoded.hidden) do
-          if type(name) == "string" then store.hidden[name] = true end
-        end
-      end
-    end
-  end
-
-  cache[proj] = store
-  return store
-end
-
---- Drop the least recently saved entries until at most MAX_ENTRIES remain.
---- @param store { selections: table<string, table> }
-local function prune(store)
-  local keys = {}
-  for k in pairs(store.selections) do table.insert(keys, k) end
-  if #keys <= MAX_ENTRIES then return end
-  table.sort(keys, function(a, b)
-    return (store.selections[a].saved_at or 0) > (store.selections[b].saved_at or 0)
-  end)
-  for i = MAX_ENTRIES + 1, #keys do store.selections[keys[i]] = nil end
-end
-
---- Write `store` to `proj`'s file, creating the storage root if needed.
---- The in-memory hidden set is flattened to a sorted array so the file stays
---- readable and its contents do not reshuffle between writes.
---- @param proj  string
---- @param store { cwd: string, selections: table<string, table>, hidden: table<string, boolean> }
-local function write_store(proj, store)
-  vim.fn.mkdir(root(), "p")
-  local f = io.open(file_for(proj), "w")
-  if not f then return end
-  local hidden = {}
-  for name in pairs(store.hidden) do table.insert(hidden, name) end
-  table.sort(hidden)
-  f:write(vim.json.encode({ cwd = store.cwd, selections = store.selections, hidden = hidden }))
-  f:close()
-end
-
---- Return `columns` minus the project's hidden names, or nil when this result
---- has none of them — nil and the full list mean the same thing to the caller,
---- and nil says "no opinion" without allocating.
---- @param store   { hidden: table<string, boolean> }
---- @param columns string[]
+--- Return the visible-column list for a result with these columns on
+--- connection `key`, or nil when nothing was ever selected there. An empty
+--- list is a valid answer: the user hid every column the result has.
+--- @param key     string|nil  composite connection key
+--- @param columns string[]    the result's full column list, in original order
 --- @return string[]|nil
-local function apply_hidden(store, columns)
-  local visible, any_hidden = {}, false
-  for _, c in ipairs(columns) do
-    if store.hidden[c] then
-      any_hidden = true
-    else
-      table.insert(visible, c)
-    end
-  end
-  if not any_hidden then return nil end
-  return visible
-end
-
---- Return the saved visible-column list for a result with these columns, or nil
---- when this project has no opinion about them. An empty list is a valid answer:
---- the user hid every column.
----
---- A selection saved for this exact column list wins, since it carries the
---- display order too. Failing that, the project's hidden names are dropped from
---- the result — that is what carries a choice across an edit to the query.
---- @param columns string[]  the result's full column list, in original order
---- @return string[]|nil
-function M.load(columns)
-  if not columns or #columns == 0 then return nil end
-
-  local store = load_store(project())
-  local entry = store.selections[key_for(columns)]
-  if type(entry) ~= "table" or type(entry.visible) ~= "table" then
-    return apply_hidden(store, columns)
-  end
+function M.load(key, columns)
+  if not key or not columns or #columns == 0 then return nil end
+  local entry = entry_for(key)
+  if not entry then return nil end
 
   local present = {}
   for _, c in ipairs(columns) do present[c] = true end
 
-  local visible = {}
+  local visible, placed = {}, {}
   for _, c in ipairs(entry.visible) do
-    if present[c] then table.insert(visible, c) end
+    if present[c] and not placed[c] then
+      table.insert(visible, c)
+      placed[c] = true
+    end
+  end
+  local hidden = {}
+  for _, c in ipairs(entry.hidden) do hidden[c] = true end
+  for _, c in ipairs(columns) do
+    if not placed[c] and not hidden[c] then
+      table.insert(visible, c)
+      placed[c] = true
+    end
   end
   return visible
 end
 
---- Fold this selection into the project's hidden set: every column the user left
---- out joins it, every column they kept leaves it. Returns true when the set
---- changed, so a save that only restores the full column list still writes.
---- @param store   { hidden: table<string, boolean> }
---- @param columns string[]
---- @param visible string[]
---- @return boolean
-local function update_hidden(store, columns, visible)
-  local shown = {}
-  for _, c in ipairs(visible) do shown[c] = true end
-
-  local changed = false
-  for _, c in ipairs(columns) do
-    local hide = not shown[c] or nil
-    if store.hidden[c] ~= hide then
-      store.hidden[c] = hide
-      changed = true
-    end
-  end
-  return changed
-end
-
---- Save the visible-column selection for a result with these columns, under the
---- current project: an entry keyed by the exact column list, plus the project's
---- hidden-name set. Saving the full column list clears the entry (it is not a
---- customisation) and un-hides those names project-wide.
---- @param columns string[]  the result's full column list, in original order
---- @param visible string[]  visible column names, in display order
-function M.save(columns, visible)
-  if not columns or #columns == 0 or not visible then return end
-
-  local proj  = project()
-  local store = load_store(proj)
-  local key   = key_for(columns)
-
-  local changed = update_hidden(store, columns, visible)
+--- Remember `visible` as the selection last made on connection `key`, for a
+--- result whose full column list is `columns`, replacing any earlier entry.
+--- Selecting every column in its own order forgets the entry instead.
+--- @param key     string|nil  composite connection key
+--- @param columns string[]    the result's full column list, in original order
+--- @param visible string[]    visible column names, in display order
+function M.save(key, columns, visible)
+  if not key or not columns or #columns == 0 or not visible then return end
 
   if same_list(columns, visible) then
-    if store.selections[key] == nil and not changed then return end
-    store.selections[key] = nil
-  else
-    store.selections[key] = {
-      columns  = vim.list_extend({}, columns),
-      visible  = vim.list_extend({}, visible),
-      saved_at = os.time(),
-    }
+    M.delete(key)
+    return
   end
 
-  prune(store)
-  write_store(proj, store)
+  local shown = {}
+  for _, c in ipairs(visible) do shown[c] = true end
+  local hidden = {}
+  for _, c in ipairs(columns) do
+    if not shown[c] then table.insert(hidden, c) end
+  end
+
+  local g, name = group_for(key, true)
+  g[name] = { visible = vim.list_extend({}, visible), hidden = hidden }
+  write_store()
 end
 
---- Forget every store read this session, so the next call re-reads from disk.
---- Only needed by tests and after the storage root changes.
+--- Forget `key`'s selection, if any.
+--- @param key string  composite connection key
+function M.delete(key)
+  local g, name = group_for(key, false)
+  if not g or g[name] == nil then return end
+  g[name] = nil
+  write_store()
+end
+
+--- Forget the selections of every connection in a group.
+--- @param server string
+--- @param driver string
+--- @param group  string
+function M.delete_group(server, driver, group)
+  local store = load_store()
+  local d = type(store[server]) == "table" and store[server][driver]
+  if type(d) ~= "table" or d[group] == nil then return end
+  d[group] = nil
+  write_store()
+end
+
+--- Move `old_key`'s selection under `new_key` (a renamed or regrouped
+--- connection keeps it). No-op when the keys are equal or `old_key` has no
+--- entry.
+--- @param old_key string
+--- @param new_key string
+function M.rename(old_key, new_key)
+  if old_key == new_key then return end
+  local entry = entry_for(old_key)
+  if not entry then return end
+  local og, oname = group_for(old_key, false)
+  og[oname] = nil
+  local ng, nname = group_for(new_key, true)
+  ng[nname] = entry
+  write_store()
+end
+
+--- Forget the store read this session, so the next call re-reads from disk.
+--- Only needed by tests and after the storage file changes.
 function M.clear_cache()
-  cache = {}
+  cache = nil
 end
 
 return M

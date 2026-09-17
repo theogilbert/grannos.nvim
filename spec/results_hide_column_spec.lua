@@ -68,17 +68,20 @@ local function show()
 end
 
 describe("results x hides the column under the cursor", function()
-  local tmp_root
+  local tmp
+  local KEY = "srv\0sqlite\0g\0db"
 
   before_each(function()
-    tmp_root = vim.fn.tempname()
-    col_selection.root = tmp_root
+    tmp = vim.fn.tempname() .. ".json"
+    col_selection.file = tmp
     col_selection.clear_cache()
     show()
   end)
 
   after_each(function()
-    vim.fn.delete(tmp_root, "rf")
+    col_selection.file = nil
+    col_selection.clear_cache()
+    vim.fn.delete(tmp)
     vim.cmd("silent! only")
   end)
 
@@ -92,7 +95,7 @@ describe("results x hides the column under the cursor", function()
 
   it("persists like a picker selection", function()
     press_x_at(vcol_of("name"))
-    assert.same({ "id", "email" }, col_selection.load(COLS))
+    assert.same({ "id", "email" }, col_selection.load(KEY, COLS))
     show()
     assert.is_nil(header():find("name", 1, true))
   end)
@@ -102,7 +105,7 @@ describe("results x hides the column under the cursor", function()
     vim.api.nvim_set_current_win(win)
     vim.api.nvim_win_set_cursor(win, { 1, 0 })  -- the row-count label
     vim.api.nvim_feedkeys("x", "x", false)
-    assert.same({ "id", "name", "email" }, col_selection.load(COLS) or COLS)
+    assert.same({ "id", "name", "email" }, col_selection.load(KEY, COLS) or COLS)
     assert.is_truthy(header():find("name", 1, true))
   end)
 end)

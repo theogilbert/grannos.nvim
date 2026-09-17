@@ -1,191 +1,106 @@
 local col_selection = require("grannos.col_selection")
+local connections   = require("grannos.connections")
 
 local COLS = { "id", "name", "email", "created_at" }
+local KEY_A = connections.conn_key("srv", "postgres", "prod", "alpha")
+local KEY_B = connections.conn_key("srv", "postgres", "prod", "beta")
 
-local tmp_root, proj_a, proj_b, orig_cwd
-
---- Point the module at a scratch storage root and start from an empty store.
-local function reset_storage()
-  col_selection.root = tmp_root
-  col_selection.clear_cache()
-  vim.fn.delete(tmp_root, "rf")
-end
-
---- Switch the global working directory, which is what scopes a selection.
---- @param dir string
-local function cd(dir)
-  vim.cmd("cd " .. vim.fn.fnameescape(dir))
-end
+local tmp
 
 describe("col_selection", function()
   before_each(function()
-    orig_cwd = vim.fn.getcwd(-1, -1)
-    tmp_root = vim.fn.tempname()
-    proj_a   = vim.fn.tempname()
-    proj_b   = vim.fn.tempname()
-    vim.fn.mkdir(proj_a, "p")
-    vim.fn.mkdir(proj_b, "p")
-    reset_storage()
-    cd(proj_a)
+    tmp = vim.fn.tempname() .. ".json"
+    col_selection.file = tmp
+    col_selection.clear_cache()
   end)
 
   after_each(function()
-    cd(orig_cwd)
-    col_selection.root = nil
+    col_selection.file = nil
     col_selection.clear_cache()
-    vim.fn.delete(tmp_root, "rf")
-    vim.fn.delete(proj_a, "rf")
-    vim.fn.delete(proj_b, "rf")
+    vim.fn.delete(tmp)
   end)
 
-  it("returns nil when nothing was ever saved", function()
-    assert.is_nil(col_selection.load(COLS))
-  end)
-
-  it("returns nil for an empty column list", function()
-    assert.is_nil(col_selection.load({}))
+  it("returns nil when nothing was ever saved, or without a connection", function()
+    assert.is_nil(col_selection.load(KEY_A, COLS))
+    assert.is_nil(col_selection.load(nil, COLS))
+    assert.is_nil(col_selection.load(KEY_A, {}))
   end)
 
   it("round-trips a selection, preserving display order", function()
-    col_selection.save(COLS, { "name", "id" })
-    assert.same({ "name", "id" }, col_selection.load(COLS))
+    col_selection.save(KEY_A, COLS, { "name", "id" })
+    assert.same({ "name", "id" }, col_selection.load(KEY_A, COLS))
   end)
 
   it("survives a restart: the selection is read back from disk", function()
-    col_selection.save(COLS, { "email" })
+    col_selection.save(KEY_A, COLS, { "email" })
     col_selection.clear_cache()
-    assert.same({ "email" }, col_selection.load(COLS))
+    assert.same({ "email" }, col_selection.load(KEY_A, COLS))
   end)
 
   it("keeps a selection of no columns", function()
-    col_selection.save(COLS, {})
+    col_selection.save(KEY_A, COLS, {})
+    assert.same({}, col_selection.load(KEY_A, COLS))
+  end)
+
+  it("scopes a selection to its connection", function()
+    col_selection.save(KEY_A, COLS, { "id" })
+    assert.is_nil(col_selection.load(KEY_B, COLS))
+  end)
+
+  it("applies the last selection to a result with other columns", function()
+    col_selection.save(KEY_A, COLS, { "name", "id" })
+    -- an edited query: hidden names dropped, chosen order kept, the new column appended
+    assert.same({ "name", "id", "total" },
+      col_selection.load(KEY_A, { "id", "total", "name", "email" }))
+    -- an unrelated query sharing no names: everything, in its own order
+    assert.same({ "b", "a" }, col_selection.load(KEY_A, { "b", "a" }))
+  end)
+
+  it("replaces the previous selection rather than accumulating it", function()
+    col_selection.save(KEY_A, COLS, { "id" })
+    col_selection.save(KEY_A, { "x", "y" }, { "y" })
+    -- `name`, `email` and `created_at` are no longer hidden: that was the older selection
+    assert.same({ "id", "name", "email", "created_at" }, col_selection.load(KEY_A, COLS))
+    assert.same({ "y" }, col_selection.load(KEY_A, { "x", "y" }))
+  end)
+
+  it("forgets the entry when every column is selected again in its own order", function()
+    col_selection.save(KEY_A, COLS, { "id" })
+    col_selection.save(KEY_A, COLS, vim.list_extend({}, COLS))
+    assert.is_nil(col_selection.load(KEY_A, COLS))
     col_selection.clear_cache()
-    assert.same({}, col_selection.load(COLS))
+    assert.is_nil(col_selection.load(KEY_A, COLS))
   end)
 
-  it("scopes a selection to its project", function()
-    col_selection.save(COLS, { "id" })
-    cd(proj_b)
-    assert.is_nil(col_selection.load(COLS))
-    col_selection.save(COLS, { "name" })
-    assert.same({ "name" }, col_selection.load(COLS))
-    cd(proj_a)
-    assert.same({ "id" }, col_selection.load(COLS))
+  it("keeps a reordering of every column", function()
+    col_selection.save(KEY_A, COLS, { "email", "id", "name", "created_at" })
+    assert.same({ "email", "id", "name", "created_at" }, col_selection.load(KEY_A, COLS))
   end)
 
-  it("scopes a stored entry to its exact column list", function()
-    col_selection.save(COLS, { "id" })
-    -- Nothing in common: no entry, and none of the hidden names are here either.
-    assert.is_nil(col_selection.load({ "a", "b" }))
-    -- Same names, different order: a different result shape, so the entry does
-    -- not apply. Only the hidden names do, in the new result's own order.
-    assert.same({ "id" }, col_selection.load({ "name", "id", "email", "created_at" }))
-  end)
-
-  it("overwrites an earlier selection for the same columns", function()
-    col_selection.save(COLS, { "id" })
-    col_selection.save(COLS, { "email", "name" })
-    col_selection.clear_cache()
-    assert.same({ "email", "name" }, col_selection.load(COLS))
-  end)
-
-  it("clears the stored selection when every column is selected again", function()
-    col_selection.save(COLS, { "id" })
-    col_selection.save(COLS, vim.list_extend({}, COLS))
-    col_selection.clear_cache()
-    assert.is_nil(col_selection.load(COLS))
-  end)
-
-  it("does not store a full selection in the first place", function()
-    col_selection.save(COLS, vim.list_extend({}, COLS))
-    col_selection.clear_cache()
-    assert.is_nil(col_selection.load(COLS))
-  end)
-
-  it("drops stored names that the result no longer has", function()
-    col_selection.save(COLS, { "name", "id" })
-
-    -- Simulate a hand-edited or stale file: same key, a name that is gone.
-    local file = vim.fn.glob(tmp_root .. "/*.json", false, true)[1]
-    local decoded = vim.json.decode(table.concat(vim.fn.readfile(file), "\n"))
-    for _, entry in pairs(decoded.selections) do
-      entry.visible = { "name", "gone", "id" }
-    end
-    vim.fn.writefile({ vim.json.encode(decoded) }, file)
-    col_selection.clear_cache()
-
-    assert.same({ "name", "id" }, col_selection.load(COLS))
-  end)
-
-  it("reuses hidden columns for a result the exact column list never saw", function()
-    col_selection.save(COLS, { "id", "name", "created_at" })  -- hides email
-
-    assert.same({ "id", "name", "status" },
-      col_selection.load({ "id", "name", "email", "status" }))
-  end)
-
-  it("keeps the new result's own order when applying hidden columns", function()
-    col_selection.save(COLS, { "created_at", "id" })  -- hides name and email
-
-    assert.same({ "status", "id", "created_at" },
-      col_selection.load({ "status", "id", "name", "created_at" }))
-  end)
-
-  it("hidden columns survive a restart", function()
-    col_selection.save(COLS, { "id", "name", "created_at" })
-    col_selection.clear_cache()
-
-    assert.same({ "id", "extra" }, col_selection.load({ "id", "email", "extra" }))
-  end)
-
-  it("says nothing about a result that has none of the hidden columns", function()
-    col_selection.save(COLS, { "id", "name", "created_at" })
-
-    assert.is_nil(col_selection.load({ "total", "bucket" }))
-  end)
-
-  it("an exact selection outranks the hidden set, keeping its display order", function()
-    col_selection.save(COLS, { "created_at", "id" })  -- hides name and email
-
-    -- The entry wins for this column list, so the order the user chose survives…
-    assert.same({ "created_at", "id" }, col_selection.load(COLS))
-    -- …while any other result falls back to the hidden names, in its own order.
-    assert.same({ "id", "created_at" }, col_selection.load({ "id", "name", "created_at" }))
-  end)
-
-  it("showing a column again un-hides it project-wide", function()
-    col_selection.save(COLS, { "id", "name", "created_at" })
-    assert.same({ "id", "status" }, col_selection.load({ "id", "email", "status" }))
-
-    col_selection.save(COLS, COLS)  -- every column back
-
-    assert.is_nil(col_selection.load({ "id", "email", "status" }))
-  end)
-
-  it("scopes hidden columns to their project", function()
-    col_selection.save(COLS, { "id" })
-    cd(proj_b)
-
-    assert.is_nil(col_selection.load({ "id", "email", "status" }))
+  it("follows the connection through delete, delete_group and rename", function()
+    col_selection.save(KEY_A, COLS, { "id" })
+    col_selection.rename(KEY_A, KEY_B)
+    assert.is_nil(col_selection.load(KEY_A, COLS))
+    assert.same({ "id" }, col_selection.load(KEY_B, COLS))
+    col_selection.delete(KEY_B)
+    assert.is_nil(col_selection.load(KEY_B, COLS))
+    col_selection.save(KEY_A, COLS, { "id" })
+    col_selection.delete_group("srv", "postgres", "prod")
+    assert.is_nil(col_selection.load(KEY_A, COLS))
   end)
 
   it("ignores an unparsable store rather than erroring", function()
-    col_selection.save(COLS, { "id" })
-    local file = vim.fn.glob(tmp_root .. "/*.json", false, true)[1]
-    vim.fn.writefile({ "not json {" }, file)
+    vim.fn.writefile({ "{not json" }, tmp)
     col_selection.clear_cache()
-
-    assert.is_nil(col_selection.load(COLS))
+    assert.is_nil(col_selection.load(KEY_A, COLS))
+    col_selection.save(KEY_A, COLS, { "id" })
+    assert.same({ "id" }, col_selection.load(KEY_A, COLS))
   end)
 
   it("mutating the saved lists afterwards does not change the store", function()
-    local cols    = vim.list_extend({}, COLS)
-    local visible = { "id" }
-    col_selection.save(cols, visible)
-    table.insert(visible, "name")
-    cols[1] = "mutated"
-    col_selection.clear_cache()
-
-    assert.same({ "id" }, col_selection.load(COLS))
+    local visible = { "id", "name" }
+    col_selection.save(KEY_A, COLS, visible)
+    table.insert(visible, "email")
+    assert.same({ "id", "name" }, col_selection.load(KEY_A, COLS))
   end)
 end)

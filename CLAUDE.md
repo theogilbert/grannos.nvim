@@ -62,7 +62,7 @@ grannos.nvim is a Neovim database-client plugin that delegates all database work
 | `lua/grannos/messages.lua` | Pure renderer for an execute response's `messages` (DBMS_OUTPUT, compilation warnings) |
 | `lua/grannos/queries.lua` | Saved-queries filesystem helpers |
 | `lua/grannos/session_params.lua` | Per-connection persistence of `session.set` values, replayed after every connect so runtime-only settings survive backend and Neovim restarts |
-| `lua/grannos/col_selection.lua` | Per-project persistence of results-pane column selections: exact column-list entries, plus a project-wide hidden-column set |
+| `lua/grannos/col_selection.lua` | Per-connection persistence of the results-pane column selection last made: its visible names in order and its hidden names, applied to every later result on that connection |
 | `lua/grannos/export.lua` | Pure serializers for exporting query results (json/csv/pretty/markdown) |
 
 ### Resolving the symbol under the cursor

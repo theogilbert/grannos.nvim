@@ -410,16 +410,17 @@ KEYMAPS ~
   H       Scroll left one column.
   L       Scroll right one column.
   c       Open a column picker to choose which columns to display.  The
-          choice is remembered per project (the working directory) and
-          restored in later sessions: a result with the same column list
-          comes back with the same columns in the same order, and any
-          other result simply drops the columns you have hidden anywhere
-          in the project, so editing the query does not lose the choice.
-          Hiding is therefore by name — hide `tenant_id` once and it is
-          gone from every result in the project that has one; show it
-          again anywhere and it comes back everywhere.  Selections live in
-          `$XDG_DATA_HOME/grannos/col_selections/`; selecting every column
-          again forgets the entry and un-hides those names.
+          selection last made on a connection is remembered for it, across
+          sessions, and applied to every later result on that connection:
+          the columns you chose come first, in the order you chose, then
+          whatever else the result has, minus the columns you hid.  So the
+          same query comes back exactly as you left it, an edited one keeps
+          the choice and appends what is new, and an unrelated one that
+          shares no names shows everything.  Each new selection replaces
+          the previous one.  Selections live in
+          `$XDG_DATA_HOME/grannos/col_selections.json`, keyed like the
+          connections file; selecting every column again in its own order
+          forgets the entry.
           Inside the picker: Tab/Enter/Space move a column across, J/K
           reorder the selected panel, `>` and `<` move every column at
           once. To move several at a time, `m` marks the column under
