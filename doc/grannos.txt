@@ -86,8 +86,10 @@ This flag can also be changed via the edit-connection wizard (`e` in the
 connections panel). The wizard includes an "Always allow write operations?"
 step that shows the current value and lets you toggle it.
 
-Note: detection relies on treesitter parsers. Buffers without a treesitter
-parser (e.g. MongoDB query buffers) are always executed without a prompt.
+Note: detection relies on treesitter parsers. In a MongoDB buffer a write
+is a command whose operation writes (`insertOne`, `updateMany`,
+`dropCollection`, …). Buffers without a treesitter parser are always
+executed without a prompt.
 
 PANEL KEYMAPS ~
 
@@ -324,7 +326,7 @@ The directory tree mirrors the scope hierarchy: >
   connection/<server>/<driver>/<group>/<conn>/<name>.<ext>
 <
 The file extension is taken from the source buffer (e.g. `.sql`, `.cypher`,
-`.lucene`).
+`.lucene`, `.mongo`).
 Files can be opened, edited, and deleted directly in the filesystem.
 The directory is created automatically on first save. Override the location
 with |grannos-queries_dir|.
@@ -494,8 +496,8 @@ The bars use `GrannosHistogramBar`; the chart's height is
 ================================================================================
 COMPLETION                                                *grannos-completion*
 
-A SQL, Cypher, PromQL or Lucene buffer associated with a connection gets
-'omnifunc' set, so |i_CTRL-X_CTRL-O| completes database names in place. No
+A SQL, Cypher, PromQL, Lucene or MongoDB buffer associated with a
+connection gets 'omnifunc' set, so |i_CTRL-X_CTRL-O| completes database names in place. No
 completion plugin is required; any engine that wraps 'omnifunc' picks this up
 automatically.
 
@@ -583,6 +585,39 @@ the `lucene` filetype, detected for `.lucene` files):
           Nothing: the mapping lists no values. A field's value, a
           phrase, a range bound and a regex offer no candidates.
 
+In MongoDB (Extended JSON command objects, the `mongo` filetype, detected
+for `.mongo` files; every name is a string, so completion happens inside
+quotes and the whole string typed so far is the prefix):
+
+  a key of the command object
+          The operations (`find`, `aggregate`, `updateOne`, …) and the
+          arguments they take (`db`, `filter`, `pipeline`, …), less the
+          keys the command already has; the operations are left out once
+          it has one.
+
+  the value of "db"
+          Database names.
+
+  the value of the operation
+          The collections of the named database — or of every database
+          when none is named yet and there are at most
+          |grannos-completion-max_schema_scan| of them, each annotated
+          with its database. A `find` also offers `gridfs.<bucket>` for
+          each GridFS bucket.
+
+  a key nested deeper
+          The collection's fields (its `fields` group, sampled by the
+          server), and the `$` operators the argument takes: query
+          operators in `filter` and in a `$match` stage, update operators
+          in `update`, stage names at the top of a `pipeline`, expression
+          operators inside a stage. Extended JSON type wrappers (`$oid`,
+          `$date`, …) are offered wherever a value is written. Fields
+          need a database and a collection; `options` and `name` offer
+          nothing.
+
+  a value starting with `$`, or any value in a pipeline
+          Field references, `"$status"`.
+
 Candidates are filtered by what has been typed, case-insensitively.
 
 AS YOU TYPE (nvim-cmp) ~                              *grannos-completion-cmp*
@@ -594,7 +629,7 @@ native nvim-cmp source named `grannos`: >lua
   })
 <
 Or, to keep it to query buffers alone: >lua
-  require("cmp").setup.filetype({ "sql", "cypher", "promql", "lucene" }, {
+  require("cmp").setup.filetype({ "sql", "cypher", "promql", "lucene", "mongo" }, {
     sources = { { name = "grannos" }, { name = "buffer" } },
   })
 <
@@ -839,11 +874,11 @@ connections_file ~
 completion.enabled ~
   Type: `boolean`   Default: `true`
 
-  Set 'omnifunc' on SQL, Cypher, PromQL and Lucene buffers that have a
-  connection, so |i_CTRL-X_CTRL-O| completes table and column names,
-  labels, relationship types and properties, metrics, labels and jobs, or
-  index and field names. See |grannos-completion|. Set to false to leave
-  'omnifunc' alone.
+  Set 'omnifunc' on SQL, Cypher, PromQL, Lucene and MongoDB buffers that
+  have a connection, so |i_CTRL-X_CTRL-O| completes table and column
+  names, labels, relationship types and properties, metrics, labels and
+  jobs, index and field names, or databases, collections and fields. See
+  |grannos-completion|. Set to false to leave 'omnifunc' alone.
 
                                       *grannos-completion-max_schema_scan*
 completion.max_schema_scan ~
@@ -989,10 +1024,9 @@ BACKEND ~
     server started by |:DbAttach|.
 
 TREESITTER PARSERS ~
-    The `sql`, `cypher`, `promql`, `lucene` and `json` parsers used to
+    The `sql`, `cypher`, `promql`, `lucene` and `mongo` parsers used to
     find the statement and the symbol under the cursor, and to complete
-    names. All but `json` (used for MongoDB queries, and shipped with
-    Neovim) ship with this plugin.
+    names. All ship with this plugin.
 
 OPTIONAL DEPENDENCIES ~
     Whether fzf-lua is installed for the saved-query picker; without it

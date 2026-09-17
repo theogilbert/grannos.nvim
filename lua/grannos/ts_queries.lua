@@ -1,6 +1,6 @@
 local M = {}
 
--- Node types that represent write operations across SQL and Cypher grammars.
+-- Node types that represent write operations across the SQL and Cypher grammars.
 local WRITE_NODE_TYPES = {
   insert_statement     = true, update_statement      = true,
   delete_statement     = true, merge_statement        = true,
@@ -17,6 +17,17 @@ local WRITE_NODE_TYPES = {
   load_statement       = true,
 }
 
+-- MongoDB operations that write. A Mongo statement is a command object whose
+-- top-level keys name the operation (the backend's MongoDriver._Op), so a
+-- write is told by key text rather than by node type.
+local MONGO_WRITE_OPS = {
+  insertOne = true, insertMany = true,
+  updateOne = true, updateMany = true,
+  deleteOne = true, deleteMany = true,
+  createCollection = true, dropCollection = true,
+  createIndex = true, dropIndex = true,
+}
+
 --- Recursively check whether `node` or any descendant is a write operation.
 --- @param node userdata
 --- @return boolean
@@ -24,6 +35,27 @@ local function node_has_write(node)
   if WRITE_NODE_TYPES[node:type()] then return true end
   for child in node:iter_children() do
     if node_has_write(child) then return true end
+  end
+  return false
+end
+
+--- Return true when `stmt` is a MongoDB command whose operation writes.
+--- Only the command object's own keys count: a `"$set"` nested in an update
+--- names no operation, and neither does a filter on a field called "deleteOne".
+--- @param stmt  userdata  a `statement` node
+--- @param bufnr integer
+--- @return boolean
+local function mongo_statement_writes(stmt, bufnr)
+  local command = stmt:named_child(0)
+  if not command or command:type() ~= "object" then return false end
+  for pair in command:iter_children() do
+    if pair:type() == "pair" then
+      local key = pair:field("key")[1]
+      local content = key and key:named_child(0)
+      if content and MONGO_WRITE_OPS[vim.treesitter.get_node_text(content, bufnr)] then
+        return true
+      end
+    end
   end
   return false
 end
@@ -67,7 +99,7 @@ function M.has_write_statement(bufnr, start_row, end_row)
     if node:type() == "statement" then
       local sr, _, er, _ = node:range()
       if sr <= end_row and er >= start_row then
-        if node_has_write(node) then return true end
+        if node_has_write(node) or mongo_statement_writes(node, bufnr) then return true end
       end
     end
   end

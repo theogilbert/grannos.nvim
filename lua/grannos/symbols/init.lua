@@ -20,14 +20,17 @@ local M = {}
 --- here has no symbol support and simply never resolves — the same outcome as a
 --- cursor sitting on a keyword.
 ---
---- `json` is MongoDB: its queries are Extended JSON command objects, not a
---- language of their own. Elasticsearch queries are JSON too, but describe no
+--- MongoDB queries are Extended JSON command objects; the `mongo` grammar is
+--- the JSON tree with a `statement` per command, so the extractor reads
+--- `json` too — a `.json` query file from before `.mongo` existed still
+--- resolves. Elasticsearch queries are JSON as well, but describe no
 --- collection or database, so the mongo extractor finds nothing in one and
 --- returns nil rather than guessing.
 local EXTRACTORS = {
   sql    = "grannos.symbols.sql",
   cypher = "grannos.symbols.cypher",
   promql = "grannos.symbols.promql",
+  mongo  = "grannos.symbols.mongo",
   json   = "grannos.symbols.mongo",
 }
 

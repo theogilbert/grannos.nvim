@@ -1,7 +1,9 @@
 --- Symbol extraction for MongoDB buffers. See `grannos.symbols` for the contract.
 ---
---- MongoDB queries are Extended JSON command objects rather than a language of
---- their own, so this runs on the `json` parser:
+--- MongoDB queries are Extended JSON command objects, and the `mongo` grammar
+--- (../treesitters/treesitter-mongo) is the JSON tree with a `statement`
+--- around each top-level object, so this reads JSON nodes and runs unchanged
+--- on the `json` parser too:
 ---
 ---     {"find": "orders", "db": "mydb", "filter": {"status": "open"}}
 ---
@@ -11,9 +13,9 @@ local util = require("grannos.symbols.util")
 
 local M = {}
 
--- Top-level keys whose value names the collection the command operates on
--- (the backend's MongoDriver._Op).
-local OPERATIONS = {
+--- Top-level keys whose value names the collection the command operates on
+--- (the backend's MongoDriver._Op). Shared with completion.
+M.OPERATIONS = {
   find = true, aggregate = true,
   insertOne = true, insertMany = true,
   updateOne = true, updateMany = true,
@@ -21,8 +23,11 @@ local OPERATIONS = {
   createCollection = true, dropCollection = true,
   createIndex = true, dropIndex = true,
 }
+local OPERATIONS = M.OPERATIONS
 
-local DB_KEY = "db"
+--- The top-level key naming the database. Shared with completion.
+M.DB_KEY = "db"
+local DB_KEY = M.DB_KEY
 
 --- Return the text inside a `string` node, or nil when it has no content
 --- (an empty string literal).
@@ -38,7 +43,7 @@ end
 --- Return the outermost object containing `node` — the command object itself.
 --- @param node userdata
 --- @return userdata|nil
-local function command_object(node)
+function M.command_object(node)
   local outermost = nil
   local n = node
   while n do
@@ -47,26 +52,29 @@ local function command_object(node)
   end
   return outermost
 end
+local command_object = M.command_object
 
---- Return the command's database name and the collection its operation names.
---- @param command userdata  the command object
---- @param bufnr   integer
---- @return string|nil db, string|nil collection
-local function command_target(command, bufnr)
-  local db, collection = nil, nil
+--- Return the command's database name, the collection its operation names,
+--- and the operation itself.
+--- @param command userdata        the command object
+--- @param source  integer|string  the buffer or text `command` was parsed from
+--- @return string|nil db, string|nil collection, string|nil operation
+function M.command_target(command, source)
+  local db, collection, operation = nil, nil, nil
   for pair in command:iter_children() do
     if pair:type() == "pair" then
-      local key = string_text(pair:field("key")[1], bufnr)
-      local value = string_text(pair:field("value")[1], bufnr)
+      local key = string_text(pair:field("key")[1], source)
+      local value = string_text(pair:field("value")[1], source)
       if key == DB_KEY then
         db = value
       elseif key and OPERATIONS[key] then
-        collection = value
+        collection, operation = value, key
       end
     end
   end
-  return db, collection
+  return db, collection, operation
 end
+local command_target = M.command_target
 
 --- Return the scopes a field of this command sits under: its collection, and
 --- the database that collection lives in.

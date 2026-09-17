@@ -285,7 +285,7 @@ describe("symbols.at_cursor for PromQL", function()
 end)
 
 describe("symbols.at_cursor for MongoDB", function()
-  local function mongo_at(text, needle) return symbol_at("json", text, needle) end
+  local function mongo_at(text, needle) return symbol_at("mongo", text, needle) end
 
   it("names the collection an operation targets", function()
     assert.same(
@@ -338,6 +338,12 @@ describe("symbols.at_cursor for MongoDB", function()
   it("ignores dollar-prefixed operators", function()
     assert.is_nil(
       mongo_at('{"updateOne": "users", "db": "mydb", "update": {"$set": {"age": 31}}}', "$set"))
+  end)
+
+  it("resolves the same in a json buffer, for query files from before .mongo", function()
+    assert.same(
+      { name = "orders", type = "collection", scope = { { name = "mydb", type = "database" } } },
+      symbol_at("json", '{"find": "orders", "db": "mydb"}', "orders"))
   end)
 
   it("returns nil for JSON that is not a Mongo command", function()

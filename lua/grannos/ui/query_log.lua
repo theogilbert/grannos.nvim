@@ -18,6 +18,7 @@ local function driver_filetype(driver)
   if not driver then return "sql" end
   local d = driver:lower()
   if d == "neo4j" or d:find("cypher") then return "cypher" end
+  if d == "mongodb" or d == "mongo" then return "mongo" end
   return "sql"
 end
 

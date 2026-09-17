@@ -1,6 +1,7 @@
 --- Context-aware completion for query buffers, per language: table and
 --- column names in SQL, labels, relationship types and properties in Cypher,
---- metrics, labels and jobs in PromQL, index and field names in Lucene.
+--- metrics, labels and jobs in PromQL, index and field names in Lucene,
+--- databases, collections, fields and operators in MongoDB commands.
 ---
 --- Exposed as 'omnifunc', so <C-x><C-o> works with no completion plugin
 --- installed and any engine that wraps omnifunc picks it up for free.
@@ -31,6 +32,7 @@ local LANGUAGES = {
   cypher = "grannos.completion.cypher",
   promql = "grannos.completion.promql",
   lucene = "grannos.completion.lucene",
+  mongo  = "grannos.completion.mongo",
 }
 
 --- bufnr → connection key, for buffers this module is attached to.

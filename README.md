@@ -137,7 +137,7 @@ Write SQL in the associated buffer and run:
 
 | Command | What it executes |
 |---------|-----------------|
-| `:DbExecute` | Current line |
+| `:DbExecute` | The statement under the cursor (a `;`-terminated SQL statement, a MongoDB command object, a blank-line-separated PromQL or Lucene query), or the current line without a parser |
 | `:'<,'>DbExecute` | Visual selection |
 | `:%DbExecute` | Whole buffer |
 
@@ -162,7 +162,7 @@ Results appear in a split window with aligned columns and a row count. For DML q
 | `q` | Close the results window |
 | `g?` | Show keymap reference |
 
-**Multiple queries:** if the SQL contains `;`, each statement is sent as a separate request and results are shown as labelled sections (`── Query 1 / 3 ──`, etc.). This does not apply to MongoDB-style drivers.
+**Multiple queries:** if the range holds several statements — SQL separated by `;`, MongoDB command objects one after another — each is sent as a separate request and results are shown as labelled sections (`── Query 1 / 3 ──`, etc.).
 
 ### 4. Query log
 
@@ -219,7 +219,7 @@ If the current buffer has an associated connection the scope picker lets you cho
 
 Duplicate names within the same scope are rejected with a warning and you are re-prompted for the name.
 
-Queries are stored as plain files under `~/.local/share/grannos/queries/` and inherit the file extension of the source buffer (e.g. `.sql`, `.cypher`, `.lucene`).
+Queries are stored as plain files under `~/.local/share/grannos/queries/` and inherit the file extension of the source buffer (e.g. `.sql`, `.cypher`, `.lucene`, `.mongo`).
 
 ### 6. Load saved queries
 

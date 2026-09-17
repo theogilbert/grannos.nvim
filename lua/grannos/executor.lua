@@ -24,13 +24,6 @@ local function detect_operation(sql)
   return DML_VERBS[word] or "affected"
 end
 
---- Return true when `driver` is a MongoDB driver identifier.
---- @param driver string
---- @return boolean
-local function is_mongo(driver)
-  return driver == "mongodb" or driver == "mongo"
-end
-
 --- Route a single-query result to the results panel.
 --- @param result table  server execute response
 --- @param sql    string  the original query text
@@ -209,7 +202,7 @@ end
 
 --- Execute `query` against `conn`.
 --- When treesitter is available and multiple statements are found in the buffer
---- range, they are run as a labelled batch.  MongoDB is always single-statement.
+--- range, they are run as a labelled batch.
 --- @param conn       ConnSession
 --- @param query      string
 --- @param bufnr      integer|nil       source buffer (for gutter marks and splitting)
@@ -223,7 +216,7 @@ function M.run(conn, query, bufnr, first_line)
     results.set_query(query, ft, bufnr, first_line)
 
     local queries
-    if not is_mongo(conn.driver) and bufnr and first_line ~= nil then
+    if bufnr and first_line ~= nil then
       local nlines   = select(2, query:gsub("\n", ""))
       local end_row  = first_line + nlines
       local stmts    = ts_queries.statements_in_range(bufnr, first_line, end_row)

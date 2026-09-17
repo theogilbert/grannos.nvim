@@ -38,9 +38,10 @@ M.defaults = {
   },
 
   completion = {
-    -- Set 'omnifunc' on connected SQL, Cypher and PromQL buffers, so
-    -- <C-x><C-o> completes table and column names — or labels, relationship
-    -- types and properties — or metrics, labels and jobs. Only `explore.list`
+    -- Set 'omnifunc' on connected SQL, Cypher, PromQL, Lucene and MongoDB
+    -- buffers, so <C-x><C-o> completes table and column names — or labels,
+    -- relationship types and properties — or metrics, labels and jobs — or
+    -- databases, collections and fields. Only `explore.list`
     -- is ever sent, and the server caches each listing permanently, so a
     -- database sees one catalog query per schema/table (or label, or metric)
     -- touched and nothing thereafter.

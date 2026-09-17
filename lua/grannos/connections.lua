@@ -584,6 +584,7 @@ local LANGUAGE_TO_FT = {
   cypher = "cypher",
   promql = "promql",
   lucene = "lucene",
+  mongo  = "mongo",
 }
 
 --- Interactively pick a saved connection and call `callback(key, params)`,

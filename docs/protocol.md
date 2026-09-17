@@ -644,6 +644,7 @@ String enum of standard query-language identifiers used in `Driver.languages`:
 | `"cypher"` | Cypher graph query language (Neo4j) |
 | `"promql"` | Prometheus Query Language (PromQL) |
 | `"lucene"` | Elasticsearch in Lucene mode: `<index> \| <query_string>` |
+| `"mongo"`  | MongoDB Extended JSON command objects, one per statement |
 
 Mapping these to editor-specific concepts (e.g. Vim filetypes) is the client's responsibility.
 
