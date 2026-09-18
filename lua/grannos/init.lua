@@ -529,6 +529,19 @@ function M.open_explorer_for(name)
   explorer.open(conn.conn_id, connections.conn_display_name(name), conn.driver, name, conn.driver_label)
 end
 
+--- Return the connection key the current buffer works against: the one a
+--- results pane shows results from, or the one a query buffer is attached
+--- to. Nil when the buffer is neither.
+--- @return string|nil
+local function current_conn_key()
+  local cur = vim.api.nvim_get_current_buf()
+  local results_ui = require("grannos.ui.results")
+  if results_ui.is_results_buf(cur) then
+    return results_ui.conn_key_for_buf(cur)
+  end
+  return state.buf_conns[cur]
+end
+
 --- Open a form to view/change a live connection's runtime-only session
 --- settings (session.set/session.get — see docs/protocol.md), e.g.
 --- Prometheus's query_mode. Never persisted to connections.json, but the
@@ -568,9 +581,12 @@ function M.open_session_settings_for(key)
   end)
 end
 
---- Open the session settings form for the current buffer's connection.
+--- Open the session settings form for the current buffer's connection. From
+--- a results pane, that is the connection its results came from — the same
+--- target as the pane's own `s` key — so a keymap bound to this function
+--- works from either buffer.
 function M.open_session_settings()
-  local key = state.buf_conns[vim.api.nvim_get_current_buf()]
+  local key = current_conn_key()
   if not key then
     vim.notify("grannos: no active connection — run :DbAttach first", vim.log.levels.WARN)
     return
@@ -993,15 +1009,7 @@ end
 --- Open the query log viewer for `conn_key` (defaults to the current buffer's connection).
 --- @param conn_key string|nil
 function M.query_log(conn_key)
-  if not conn_key then
-    local cur = vim.api.nvim_get_current_buf()
-    local results_ui = require("grannos.ui.results")
-    if results_ui.is_results_buf(cur) then
-      conn_key = results_ui.conn_key_for_buf(cur)
-    else
-      conn_key = state.buf_conns[cur]
-    end
-  end
+  conn_key = conn_key or current_conn_key()
   if not conn_key then
     vim.notify("grannos: no connection associated with current buffer", vim.log.levels.WARN)
     return

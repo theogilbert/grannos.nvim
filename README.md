@@ -375,6 +375,12 @@ db.load_query("prod-mssql")
 db.query_log()
 db.query_log("prod-mssql")
 
+-- Open the session settings form (e.g. a time range) for the current buffer's
+-- connection — from a results pane, the connection its results came from —
+-- or for conn_key specifically. The same form as `s` in either pane.
+db.open_session_settings()
+db.open_session_settings_for("prod-mssql")
+
 -- Cancel the in-flight query whose gutter running icon sits on the cursor line.
 -- Warns if the cursor is not over a running query.
 db.cancel_query()

@@ -760,6 +760,19 @@ require("grannos").query_log([{conn_key}])
     if no connection can be resolved.
     Equivalent to |:DbQueryLog|. See |grannos-query-log|.
 
+                                      *grannos.open_session_settings()*
+require("grannos").open_session_settings()
+    Open the session settings form for the current buffer's connection:
+    the one a query buffer is attached to, or, from a results pane, the
+    one its results came from. Shows a warning if the buffer is neither.
+    The same form as `s` in the connections panel and the results pane —
+    see |grannos-results| for what it holds.
+
+                                  *grannos.open_session_settings_for()*
+require("grannos").open_session_settings_for({conn_key})
+    Open the session settings form for {conn_key}. Shows a warning if that
+    connection is not open or its driver has no session settings.
+
                                               *grannos.cancel_query()*
 require("grannos").cancel_query()
     Cancel the in-flight query whose gutter running icon sits on the cursor

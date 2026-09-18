@@ -59,6 +59,8 @@ grannos.open_current_driver_help()	grannos.txt	/*grannos.open_current_driver_hel
 grannos.open_driver_help()	grannos.txt	/*grannos.open_driver_help()*
 grannos.open_explorer()	grannos.txt	/*grannos.open_explorer()*
 grannos.open_explorer_for()	grannos.txt	/*grannos.open_explorer_for()*
+grannos.open_session_settings()	grannos.txt	/*grannos.open_session_settings()*
+grannos.open_session_settings_for()	grannos.txt	/*grannos.open_session_settings_for()*
 grannos.query_log()	grannos.txt	/*grannos.query_log()*
 grannos.restart()	grannos.txt	/*grannos.restart()*
 grannos.save_query()	grannos.txt	/*grannos.save_query()*
