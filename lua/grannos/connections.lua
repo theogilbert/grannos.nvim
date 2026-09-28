@@ -444,6 +444,33 @@ function M.build_session_values(caps, driver, values)
   return out
 end
 
+--- Return whether `driver` declares any session_params.
+--- @param caps   table
+--- @param driver string
+--- @return boolean
+function M.has_session_params(caps, driver)
+  return #find_session_params(caps, driver) > 0
+end
+
+--- Render session values as "key=value, key=value" in the order the driver
+--- declares its session_params, skipping unset ones. Empty string when none
+--- is set.
+--- @param caps   table
+--- @param driver string
+--- @param values table|nil  session values keyed by param key (as from session.get)
+--- @return string
+function M.session_summary(caps, driver, values)
+  if not values then return "" end
+  local parts = {}
+  for _, p in ipairs(find_session_params(caps, driver)) do
+    local v = values[p.key]
+    if v ~= nil and v ~= vim.NIL and v ~= "" then
+      table.insert(parts, p.key .. "=" .. tostring(v))
+    end
+  end
+  return table.concat(parts, ", ")
+end
+
 --- Build a Yes/No ConnFormField.
 --- @param key     string
 --- @param label   string

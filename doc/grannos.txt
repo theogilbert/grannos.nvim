@@ -55,7 +55,10 @@ CONNECTIONS PANEL                                        *grannos-connections*
 
 Open the connections panel with |:DbConnections|. Connections are grouped by
 driver and persist across sessions. A "Connected to name (driver)" label
-appears at the bottom of any window whose buffer has an associated connection.
+appears at the bottom of any window whose buffer has an associated connection,
+followed by the connection's session settings in parentheses when its driver
+has any (e.g. "(query_mode=range)"). Attaching a buffer appends an empty last
+line to it if it has none, so the label never covers the last line of content.
 
 CONNECTIONS FILE ~
 

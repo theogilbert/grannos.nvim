@@ -129,7 +129,7 @@ From the buffer you want to query:
 :DbAttach
 ```
 
-A picker floats over the editor: a search box on top, every saved connection listed below as `group/name (driver)`. Connections already open come first, marked with `●`; the buffer's current one is highlighted. Type to filter, `<Down>`/`<Up>` (or `<C-n>`/`<C-p>`) to move, `<CR>` to select, `<Esc>` to clear the filter then close. Picking an open connection just links the buffer to it; picking a closed one connects (prompting for the password if needed) and then links. `[+ New connection]` at the end opens the new-connection wizard. Once linked, a "Connected to name (driver)" label appears at the bottom of the window.
+A picker floats over the editor: a search box on top, every saved connection listed below as `group/name (driver)`. Connections already open come first, marked with `●`; the buffer's current one is highlighted. Type to filter, `<Down>`/`<Up>` (or `<C-n>`/`<C-p>`) to move, `<CR>` to select, `<Esc>` to clear the filter then close. Picking an open connection just links the buffer to it; picking a closed one connects (prompting for the password if needed) and then links. `[+ New connection]` at the end opens the new-connection wizard. Once linked, a "Connected to name (driver)" label appears at the bottom of the window, followed by the connection's session settings in parentheses when its driver has any. Linking also appends an empty last line to the buffer if it has none, so the label never hides the last line of content.
 
 ### 3. Execute queries
 

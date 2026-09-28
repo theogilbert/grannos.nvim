@@ -68,13 +68,43 @@ local function conn_for_buf(bufnr)
   return name and state.conns[name]
 end
 
---- Return the human-readable label "display_name (Driver Label)" for a connection key.
+--- Return the human-readable label "display_name (Driver Label) (key=value, …)"
+--- for a connection key; the last part lists the connection's session values
+--- and is left out when it has none.
 --- @param key string
 --- @return string
 local function conn_display_label(key)
   local conn  = state.conns[key]
   local label = conn and (conn.driver_label or conn.driver)
-  return label and (connections.conn_display_name(key) .. " (" .. label .. ")") or connections.conn_display_name(key)
+  local text  = connections.conn_display_name(key)
+  if not label then return text end
+  text = text .. " (" .. label .. ")"
+  local summary = connections.session_summary(client.capabilities() or { drivers = {} }, conn.driver, conn.session)
+  if summary ~= "" then text = text .. " (" .. summary .. ")" end
+  return text
+end
+
+--- Append an empty line to `bufnr` unless it already ends with one, so the
+--- last line of content can always be scrolled above the "Connected to …"
+--- label pinned to the window's bottom row.
+--- @param bufnr integer
+local function ensure_trailing_blank(bufnr)
+  if not vim.api.nvim_buf_is_valid(bufnr) or not vim.bo[bufnr].modifiable then return end
+  local last = vim.api.nvim_buf_get_lines(bufnr, -2, -1, false)[1]
+  if last == nil or last == "" then return end
+  vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, { "" })
+end
+
+--- Redraw the "Connected to …" label of every window showing a buffer
+--- attached to `key` (after the label's text changed).
+--- @param key string  composite connection key
+local function refresh_conn_labels(key)
+  local text = conn_display_label(key)
+  for bufnr, name in pairs(state.buf_conns) do
+    if name == key and not state.silent_bufs[bufnr] then
+      for _, winid in ipairs(vim.fn.win_findbuf(bufnr)) do conn_label.show(winid, text) end
+    end
+  end
 end
 
 --- Associate (or, with name=nil, dissociate) a buffer with a connection and update winbar labels.
@@ -92,6 +122,7 @@ local function set_buf_conn(bufnr, name, opts)
   end
   local keys = config.options.keymaps
   if name then
+    ensure_trailing_blank(bufnr)
     vim.keymap.set("n", keys.hover_key, function() M.describe_symbol_at_cursor() end,
       { buffer = bufnr, desc = "Describe symbol under cursor" })
     vim.keymap.set("n", keys.query_info_key, function() M.show_query_info() end,
@@ -256,17 +287,35 @@ local CLIENT_ONLY_FIELDS = { requires_password = true }
 --- @param name    string  composite connection key
 --- @param conn_id any     backend connection id
 --- @param driver  string
-local function restore_session_params(name, conn_id, driver)
+--- @param on_done fun()   called once the replay settled (or at once when there is nothing to replay)
+local function restore_session_params(name, conn_id, driver, on_done)
   local stored = session_params.get(name)
-  if not stored then return end
+  if not stored then return on_done() end
   local caps   = client.capabilities() or { drivers = {} }
   local values = connections.build_session_values(caps, driver, stored)
-  if next(values) == nil then return end
+  if next(values) == nil then return on_done() end
   client.set_session(conn_id, values, function(err)
     if err then
       vim.notify(("grannos: could not restore session settings for %q — %s")
         :format(connections.conn_display_name(name), err), vim.log.levels.WARN)
     end
+    on_done()
+  end)
+end
+
+--- Fetch `key`'s current session values (session.get) into its connection
+--- record and redraw its "Connected to …" labels, which display them. No-op
+--- when the connection is gone or its driver declares no session settings.
+--- @param key string  composite connection key
+local function refresh_session_values(key)
+  local conn = state.conns[key]
+  if not conn or not connections.has_session_params(client.capabilities() or { drivers = {} }, conn.driver) then
+    return
+  end
+  client.get_session(conn.conn_id, function(err, current)
+    if err or state.conns[key] ~= conn then return end
+    conn.session = current
+    refresh_conn_labels(key)
   end)
 end
 
@@ -299,7 +348,7 @@ function M._send_connect(name, params, after_connect)
     state.conns[name] = { conn_id = result.connection_id, driver = driver, key = name, driver_label = driver_label }
     vim.notify(("grannos: connected to %q (%s)"):format(display, driver_label), vim.log.levels.INFO)
     connections_panel.refresh()
-    restore_session_params(name, result.connection_id, driver)
+    restore_session_params(name, result.connection_id, driver, function() refresh_session_values(name) end)
     if after_connect then after_connect(name) end
   end)
 end
@@ -573,7 +622,10 @@ function M.open_session_settings_for(key)
       on_submit = function(values, done)
         local session_values = connections.build_session_values(caps, conn.driver, values)
         client.set_session(conn.conn_id, session_values, function(err2)
-          if not err2 then session_params.save(key, session_values) end
+          if not err2 then
+            session_params.save(key, session_values)
+            refresh_session_values(key)
+          end
           done(err2)
         end)
       end,
