@@ -36,6 +36,31 @@ local function row_count()
   return #f.fields + (f.on_test and 1 or 0)
 end
 
+--- Split `text` into pieces of at most `width` display columns, breaking at the
+--- last space that fits and mid-word only when a single word is wider than `width`.
+--- @param text  string
+--- @param width integer
+--- @return string[]
+local function wrap(text, width)
+  local out = {}
+  while vim.api.nvim_strwidth(text) > width do
+    local head = vim.fn.strcharpart(text, 0, width)
+    -- Shrink until it fits: a wide (e.g. CJK) character counts double.
+    while vim.api.nvim_strwidth(head) > width do
+      head = vim.fn.strcharpart(head, 0, vim.fn.strchars(head) - 1)
+    end
+    local cut = #head
+    if text:sub(cut + 1, cut + 1) ~= " " then
+      local space = head:match(".*() ")
+      if space and space > 1 then cut = space - 1 end
+    end
+    out[#out + 1] = (text:sub(1, cut):gsub("%s+$", ""))
+    text = text:sub(cut + 1):gsub("^%s+", "")
+  end
+  out[#out + 1] = text
+  return out
+end
+
 --- Append `text` as a ✗-prefixed message and return the 0-indexed row range it
 --- occupies, for the caller to highlight.
 ---
@@ -43,15 +68,19 @@ end
 --- both return multi-line errors, and a PL/SQL failure can run to a dozen lines
 --- — so it is split across buffer lines rather than interpolated into one.
 --- `nvim_buf_set_lines` rejects the entire call when any item contains a
---- newline, which would take the whole form down with it.
+--- newline, which would take the whole form down with it. Each line is also
+--- wrapped to the form's width, so a long one-line driver error stays readable
+--- instead of running off the right edge of the window.
 --- @param lines string[]  mutable line array being built
 --- @param text  string
 --- @return integer, integer  first row, last row (both 0-indexed, inclusive)
 local function append_message(lines, text)
   local first = #lines
-  for i, part in ipairs(vim.split(tostring(text), "\n", { plain = true })) do
-    local body = (part:gsub("\r$", ""))
-    lines[#lines + 1] = (i == 1) and ("  \xE2\x9C\x97 " .. body) or ("    " .. body)
+  local width = math.max(20, (f.width or 60) - 4)  -- 4 = the "  ✗ " / "    " indent
+  for _, part in ipairs(vim.split(tostring(text), "\n", { plain = true })) do
+    for _, body in ipairs(wrap((part:gsub("\r$", "")), width)) do
+      lines[#lines + 1] = (#lines == first) and ("  \xE2\x9C\x97 " .. body) or ("    " .. body)
+    end
   end
   return first, #lines - 1
 end

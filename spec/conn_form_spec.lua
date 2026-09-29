@@ -70,6 +70,25 @@ describe("conn_form rendering", function()
       assert.is_nil(l:find("\n", 1, true))
     end
   end)
+
+  it("wraps a long test error to the form's width without losing any of it", function()
+    local words = {}
+    for i = 1, 60 do words[i] = "word" .. i end
+    local long  = "x" .. string.rep("y", 150) .. " " .. table.concat(words, " ")
+    local lines = render_after_test(form_opts(long))
+    local width = vim.api.nvim_win_get_width(0)
+    local msg   = {}
+    for _, l in ipairs(lines) do
+      local body = l:match("^  \xE2\x9C\x97 (.*)") or (#msg > 0 and l:match("^    (%S.*)"))
+      if body then
+        assert.is_true(vim.api.nvim_strwidth(l) <= width, l)
+        msg[#msg + 1] = body
+      end
+    end
+    assert.is_true(#msg > 2)
+    -- Every character survives; the 151-char run is necessarily cut mid-word.
+    assert.equals(long:gsub(" ", ""), (table.concat(msg):gsub(" ", "")))
+  end)
 end)
 
 describe("conn_form x clears a field", function()
