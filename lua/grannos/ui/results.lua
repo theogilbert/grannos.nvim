@@ -964,7 +964,8 @@ render_table = function(buf_state)
   end
 
   local sep = sep_array_for(buf_state.vis_columns, buf_state.sep_columns)
-  local tbl = table_fmt.from_structured_data(display, 1, sep, config.options.results.decimal_separator)
+  local tbl = table_fmt.from_structured_data(display, 1, sep, config.options.results.decimal_separator,
+    math.floor(vim.o.columns / 2))
   buf_state.table_data = tbl
 
   local label = rows_label(rows_ret, rows_tot, buf_state.page, page_size)
@@ -1279,7 +1280,8 @@ local function build_segment(idx, total, columns, rows, rows_returned, rows_tota
   local display   = { columns }
   for i = 1, math.min(rows_returned, page_size) do table.insert(display, rows[i]) end
   local sep   = sep_array_for(columns, sep_columns)
-  local tbl   = table_fmt.from_structured_data(display, 1, sep, config.options.results.decimal_separator)
+  local tbl   = table_fmt.from_structured_data(display, 1, sep, config.options.results.decimal_separator,
+    math.floor(vim.o.columns / 2))
   local label = rows_label(rows_returned, rows_total, 1, page_size)
   if duration_ms then label = label .. "  ·  " .. format_duration(duration_ms) end
   local content = { label, "" }

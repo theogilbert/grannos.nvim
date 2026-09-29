@@ -8,6 +8,7 @@ local M = {}
 --- @field text          string[]   rendered lines ready to set into a buffer
 --- @field sep           string|nil thousands-separator used for numeric cells, if any
 --- @field decimal_sep   string|nil decimal-point separator used for numeric cells, if any
+--- @field left_aligned  table<integer, boolean> columns whose cells are left-aligned rather than centered
 
 M.COL_SEPARATOR = "│"
 
@@ -129,6 +130,24 @@ local function center(text, width)
   return string.rep(" ", math.floor(space)) .. text .. string.rep(" ", math.ceil(space))
 end
 
+--- Left-align `text` within `width` display columns, keeping the 1-space padding on the left.
+--- @param text  string
+--- @param width integer
+--- @return string
+local function left(text, width)
+  return " " .. text .. string.rep(" ", width - vim.api.nvim_strwidth(text) - 1)
+end
+
+--- Display-column offset of `text` from the start of its cell.
+--- @param text    string
+--- @param width   integer  the cell's width
+--- @param is_left boolean  whether the cell is left-aligned
+--- @return integer
+local function text_offset(text, width, is_left)
+  if is_left then return 1 end
+  return math.floor((width - vim.api.nvim_strwidth(text)) / 2)
+end
+
 --- Expand `widths[i]` to fit the display width of each cell in `cols` (with 1-space padding each side).
 --- Runs over `ncols` rather than the row's own length, so a row that is missing
 --- trailing cells still reserves a width for them.
@@ -181,8 +200,10 @@ end
 ---   every column, a per-column array (sparse; nil entries disable that column) applies selectively,
 ---   nil/false/"" disables it everywhere
 --- @param decimal_sep string|boolean|nil  decimal-point separator for numeric cells, or nil/false/"" for "."
+--- @param left_align_width integer|nil  a column wider than this many display columns is left-aligned
+---   instead of centered, so its short cells don't float in the middle of a wide one; nil centers every column
 --- @return FormattedTable
-function M.from_structured_data(lines, header_lines, sep, decimal_sep)
+function M.from_structured_data(lines, header_lines, sep, decimal_sep, left_align_width)
   header_lines = header_lines or 1
   decimal_sep = (decimal_sep and decimal_sep ~= "") and decimal_sep or nil
   -- Every row renders the same number of columns as the widest one: a row that
@@ -199,11 +220,17 @@ function M.from_structured_data(lines, header_lines, sep, decimal_sep)
     maybe_yield(i)
   end
 
+  local left_aligned = {}
+  if left_align_width then
+    for j = 1, ncols do left_aligned[j] = widths[j] > left_align_width or nil end
+  end
+
   local formatted = {}
   for i, row in ipairs(lines) do
     local cells = {}
     for j = 1, ncols do
-      cells[j] = center(cell_display(row[j], sep and sep[j], decimal_sep), widths[j])
+      local align = left_aligned[j] and left or center
+      cells[j] = align(cell_display(row[j], sep and sep[j], decimal_sep), widths[j])
     end
     table.insert(formatted, M.COL_SEPARATOR .. table.concat(cells, M.COL_SEPARATOR) .. M.COL_SEPARATOR)
     maybe_yield(i)
@@ -213,7 +240,8 @@ function M.from_structured_data(lines, header_lines, sep, decimal_sep)
     table.insert(formatted, header_lines + 1, build_separator(widths))
   end
 
-  return { lines = lines, columns_width = widths, text = formatted, sep = sep, decimal_sep = decimal_sep }
+  return { lines = lines, columns_width = widths, text = formatted, sep = sep, decimal_sep = decimal_sep,
+           left_aligned = left_aligned }
 end
 
 --- Return the 1-indexed column at a virtual cursor position,
@@ -377,7 +405,8 @@ function M.thousands_hl_rules(tbl)
       local sep_char = tbl.sep[j]
       if type(cell) == "number" and sep_char then
         local s, int_len = format_number(cell, sep_char, tbl.decimal_sep)
-        local base  = positions[j][1] + math.floor((tbl.columns_width[j] - vim.api.nvim_strwidth(s)) / 2)
+        local base  = positions[j][1]
+          + text_offset(s, tbl.columns_width[j], tbl.left_aligned and tbl.left_aligned[j] or false)
         local int_s = s:sub(1, int_len)
         local from  = 1
         while true do

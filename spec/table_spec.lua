@@ -176,3 +176,27 @@ describe("table.get_column_at_cursor", function()
     assert.is_nil(table_fmt.get_column_at_cursor(widths, 12))     -- past the last column
   end)
 end)
+
+describe("table.from_structured_data left_align_width", function()
+  local rows = { { "id", "note" }, { 1, "a fairly long note" }, { 22, "x" } }
+
+  it("centers every column when no threshold is given", function()
+    local tbl = table_fmt.from_structured_data(rows, 1, nil, ".")
+    assert.equals("│ 22 │         x          │", tbl.text[4])
+  end)
+
+  it("left-aligns only the columns wider than the threshold", function()
+    local tbl = table_fmt.from_structured_data(rows, 1, nil, ".", 10)
+    assert.is_nil(tbl.left_aligned[1])
+    assert.is_true(tbl.left_aligned[2])
+    assert.equals("│ id │ note               │", tbl.text[1])
+    assert.equals("│ 22 │ x                  │", tbl.text[4])
+  end)
+
+  it("places thousands-separator highlights at the left-aligned offset", function()
+    local tbl = table_fmt.from_structured_data({ { "n" }, { 1234 }, { 1234567890123 } }, 1, "_", ".", 5)
+    local rule = table_fmt.thousands_hl_rules(tbl)[1]
+    -- "│ 1_234 ..." : │ is 3 bytes, 1 space of padding, then "1" → "_" at byte 5
+    assert.same({ 2, 5 }, rule.start)
+  end)
+end)
