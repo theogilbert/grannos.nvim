@@ -5,7 +5,7 @@ local queries = require("grannos.queries")
 local SEP     = "\t"
 local KEY_SEP = "\1"   -- SOH: won't appear in scope keys or query names
 
-local COMMENT_PREFIX = { cypher = "//", mongo = "//" }
+local COMMENT_PREFIX = { cypher = "//", mongo = "//", promql = "#" }
 
 --- Return the line-comment prefix for `filetype`, defaulting to "--".
 --- @param filetype string
