@@ -1,5 +1,5 @@
--- Built-in documentation: the generated PromQL table, the node → built-in
--- lookup, the docstring layout, and the hover key showing it.
+-- Built-in documentation: the generated PromQL and MongoDB tables, the node →
+-- built-in lookup, the docstring layout, and the hover key showing it.
 -- Stubs must be installed before the modules under test require them.
 package.loaded["grannos.client"] = {
   capabilities = function() return { drivers = {} } end,
@@ -26,6 +26,22 @@ local function promql_buf(text, needle)
   vim.bo[buf].filetype = "promql"
   vim.api.nvim_win_set_buf(0, buf)
   vim.api.nvim_win_set_cursor(0, { 1, assert(text:find(needle, 1, true)) - 1 })
+  return buf
+end
+
+--- Open a MongoDB buffer holding `text`, cursor on the `nth` (default first) `needle`.
+--- @param text   string
+--- @param needle string
+--- @param nth    integer|nil
+--- @return integer
+local function mongo_buf(text, needle, nth)
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { text })
+  vim.bo[buf].filetype = "mongo"
+  vim.api.nvim_win_set_buf(0, buf)
+  local at = 0
+  for _ = 1, nth or 1 do at = assert(text:find(needle, at + 1, true)) end
+  vim.api.nvim_win_set_cursor(0, { 1, at - 1 })
   return buf
 end
 
@@ -65,6 +81,33 @@ describe("builtins.promql (generated)", function()
   end)
 end)
 
+describe("builtins.mongo (generated)", function()
+  local data = require("grannos.builtins.mongo")
+
+  it("keys every operator by category, a name in several having an entry in each", function()
+    assert.equals("$match: <query>", data.categories.stage["$match"].signature)
+    assert.equals("Sets the value of a field.", data.categories.update["$set"].doc)
+    assert.is_truthy(data.categories.stage["$set"].doc:find("^Adds new fields"))
+    assert.is_nil(data.categories.query["$group"])
+  end)
+
+  it("builds each signature from the argument encoding", function()
+    assert.equals("$cond: { if, then, else }", data.categories.expression["$cond"].signature)
+    assert.equals("$substr: [ string, start, length ]", data.categories.expression["$substr"].signature)
+    assert.equals("$add: [ expression, ... ]", data.categories.expression["$add"].signature)
+    assert.equals("$group: { _id, <field>: ..., ... }", data.categories.stage["$group"].signature)
+  end)
+
+  it("carries the minimum version and the documented arguments", function()
+    local trunc = data.categories.expression["$dateTrunc"]
+    assert.equals("5.1", trunc.min_version)
+    assert.equals("date", trunc.args[1].name)
+    assert.is_false(trunc.args[1].optional)
+    assert.equals("binSize", trunc.args[3].name)
+    assert.is_true(trunc.args[3].optional)
+  end)
+end)
+
 describe("builtins.at_cursor", function()
   it("finds a call's function", function()
     local buf = promql_buf("sum(rate(http_requests_total[5m]))", "rate")
@@ -93,6 +136,40 @@ describe("builtins.at_cursor", function()
   end)
 end)
 
+describe("builtins.at_cursor in a MongoDB buffer", function()
+  local pipeline = '{"aggregate": "orders", "db": "mydb", "pipeline": [{"$set": {"a": 1}}, '
+    .. '{"$group": {"_id": "$s", "t": {"$sum": {"$multiply": ["$a", 2]}}}}]}'
+
+  it("names a stage at the top of a pipeline stage", function()
+    local b = builtins.at_cursor(mongo_buf(pipeline, "$set"))
+    assert.equals("$set", b.name)
+    assert.equals("stage", b.category)
+  end)
+
+  it("prefers an accumulator inside a grouping stage, an expression below it", function()
+    assert.equals("accumulator", builtins.at_cursor(mongo_buf(pipeline, "$sum")).category)
+    assert.equals("expression", builtins.at_cursor(mongo_buf(pipeline, "$multiply")).category)
+  end)
+
+  it("tells a filter's query operators, $expr's expressions and update operators apart", function()
+    local cmd = '{"updateOne": "orders", "db": "mydb", "filter": {"a": {"$gt": 1}, "$expr": {"$gt": [1, 2]}}, "update": {"$set": {"a": 1}}}'
+    assert.equals("query", builtins.at_cursor(mongo_buf(cmd, "$gt")).category)
+    assert.equals("expression", builtins.at_cursor(mongo_buf(cmd, "$gt", 2)).category)
+    assert.equals("update", builtins.at_cursor(mongo_buf(cmd, "$set")).category)
+  end)
+
+  it("returns nil on a field, a field reference, a type wrapper and a command key", function()
+    assert.is_nil(builtins.at_cursor(mongo_buf(pipeline, 'a":')))
+    assert.is_nil(builtins.at_cursor(mongo_buf(pipeline, '$s"')))
+    assert.is_nil(builtins.at_cursor(mongo_buf('{"find": "orders", "filter": {"_id": {"$oid": "x"}}}', "$oid")))
+    assert.is_nil(builtins.at_cursor(mongo_buf(pipeline, "pipeline")))
+  end)
+
+  it("returns nil in JSON that is no Mongo command", function()
+    assert.is_nil(builtins.at_cursor(mongo_buf('{"filter": {"$gt": 1}}', "$gt")))
+  end)
+end)
+
 describe("builtins.hover_lines", function()
   it("lays a function out as signature, blank, wrapped description", function()
     local lines, hls = builtins.hover_lines(builtins.lookup("promql", "rate"))
@@ -111,6 +188,18 @@ describe("builtins.hover_lines", function()
   it("ends with the feature flag an experimental built-in needs", function()
     local lines, hls = builtins.hover_lines(builtins.lookup("promql", "limitk"))
     assert.is_truthy(lines[#lines]:find("promql%-experimental%-functions"))
+    assert.equals("GrannosExplorerDim", hls[#hls][1])
+  end)
+
+  it("lays a Mongo operator out with its arguments and a category/version footer", function()
+    local lines, hls = builtins.hover_lines(builtins.lookup("mongo", "$dateTrunc", { "expression" }))
+    assert.equals("$dateTrunc: { date, unit, binSize?, timezone?, startOfWeek? }", lines[1])
+    assert.equals("Truncates a date.", lines[3])
+    assert.equals("date", lines[5])
+    assert.is_truthy(lines[6]:find("^  The date to truncate"))
+    assert.is_true(vim.tbl_contains(lines, "binSize (optional)"))
+    assert.equals("expression · MongoDB 5.1+", lines[#lines])
+    assert.same({ "GrannosHeaderRow", 0, 0, #"$dateTrunc" }, hls[1])
     assert.equals("GrannosExplorerDim", hls[#hls][1])
   end)
 end)

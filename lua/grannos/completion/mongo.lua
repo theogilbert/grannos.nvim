@@ -15,9 +15,10 @@
 ---   - a key nested deeper — in `filter`, `sort`, `update`, a pipeline stage:
 ---     the collection's fields, and the `$` operators that argument takes
 ---     (query operators in a filter, update operators in an update, stage
----     names at the top of a pipeline, expression operators inside a stage),
----     the two told apart by what has been typed — every operator starts
----     with `$`, no field does;
+---     names at the top of a pipeline, accumulators and expression operators
+---     inside a stage — see `symbols.mongo.key_categories`), each documented
+---     from `grannos.builtins`; the two told apart by what has been typed —
+---     every operator starts with `$`, no field does;
 ---   - a string value starting with `$` (or any string value in a pipeline):
 ---     a field reference, `"$status"`.
 ---
@@ -25,10 +26,11 @@
 --- the cursor's statement re-parsed, the string it is in closed right after
 --- it and brackets closed at the end (`close_open` below), so a half-typed
 --- key parses as a pair of its object.
-local cache   = require("grannos.completion.cache")
-local config  = require("grannos.config")
-local repair  = require("grannos.completion.repair")
-local symbols = require("grannos.symbols.mongo")
+local builtins = require("grannos.builtins")
+local cache    = require("grannos.completion.cache")
+local config   = require("grannos.config")
+local repair   = require("grannos.completion.repair")
+local symbols  = require("grannos.symbols.mongo")
 
 local M = {}
 
@@ -74,55 +76,33 @@ local COMMAND_KEYS = {
 --- and an index name.
 local OPAQUE_ARGUMENTS = { options = true, name = true, limit = true }
 
-local QUERY_OPERATORS = {
-  "$eq", "$ne", "$gt", "$gte", "$lt", "$lte", "$in", "$nin",
-  "$and", "$or", "$not", "$nor",
-  "$exists", "$type", "$expr", "$jsonSchema", "$mod", "$regex", "$options",
-  "$text", "$where", "$all", "$elemMatch", "$size",
-  "$geoIntersects", "$geoWithin", "$near", "$nearSphere",
-  "$bitsAllClear", "$bitsAllSet", "$bitsAnyClear", "$bitsAnySet",
+--- Keys an operator's argument takes that the specifications define no
+--- operator for: `$regex`'s options, and the modifiers `$push` and
+--- `$addToSet` take. Offered undocumented beside their category's operators.
+local UNSPECIFIED = {
+  query  = { "$options" },
+  update = { "$each", "$position", "$slice", "$sort" },
 }
 
-local UPDATE_OPERATORS = {
-  "$set", "$unset", "$inc", "$mul", "$rename", "$min", "$max",
-  "$currentDate", "$setOnInsert",
-  "$push", "$pull", "$pullAll", "$addToSet", "$pop",
-  "$each", "$slice", "$sort", "$position", "$bit",
-}
+--- Per category, its operators as candidates, laid out once: the lists are
+--- static and their docstrings cost a layout each.
+local CATEGORY_ITEMS = {}
 
-local STAGE_OPERATORS = {
-  "$match", "$group", "$project", "$sort", "$limit", "$skip", "$count",
-  "$unwind", "$lookup", "$graphLookup", "$addFields", "$set", "$unset",
-  "$replaceRoot", "$replaceWith", "$facet", "$bucket", "$bucketAuto",
-  "$sortByCount", "$sample", "$out", "$merge", "$unionWith", "$redact",
-  "$geoNear", "$densify", "$fill", "$setWindowFields", "$documents",
-  "$collStats", "$indexStats", "$search", "$searchMeta", "$vectorSearch",
-}
-
-local EXPRESSION_OPERATORS = {
-  -- accumulators
-  "$sum", "$avg", "$min", "$max", "$first", "$last", "$push", "$addToSet",
-  "$count", "$stdDevPop", "$stdDevSamp", "$mergeObjects",
-  -- arithmetic
-  "$add", "$subtract", "$multiply", "$divide", "$mod", "$abs", "$ceil",
-  "$floor", "$round", "$trunc", "$pow", "$sqrt",
-  -- comparison and boolean
-  "$eq", "$ne", "$gt", "$gte", "$lt", "$lte", "$cmp", "$in", "$and", "$or",
-  "$not",
-  -- conditional
-  "$cond", "$ifNull", "$switch",
-  -- strings
-  "$concat", "$toLower", "$toUpper", "$substr", "$substrCP", "$split",
-  "$trim", "$strLenCP", "$regexMatch", "$regexFind",
-  -- arrays and objects
-  "$arrayElemAt", "$size", "$filter", "$map", "$reduce", "$slice",
-  "$concatArrays", "$setUnion", "$setIntersection", "$objectToArray",
-  "$arrayToObject", "$getField", "$setField",
-  -- dates and conversion
-  "$dateToString", "$dateFromString", "$year", "$month", "$dayOfMonth",
-  "$hour", "$toString", "$toInt", "$toLong", "$toDouble", "$toDate",
-  "$toObjectId", "$convert", "$type", "$literal", "$let",
-}
+--- @param category string  as `grannos.builtins` names it
+--- @return { word: string, info: string|nil }[]
+local function category_items(category)
+  if not CATEGORY_ITEMS[category] then
+    local items = {}
+    for _, b in ipairs(builtins.all("mongo", category)) do
+      items[#items + 1] = { word = b.name, info = table.concat((builtins.hover_lines(b)), "\n") }
+    end
+    for _, name in ipairs(UNSPECIFIED[category] or {}) do
+      items[#items + 1] = { word = name }
+    end
+    CATEGORY_ITEMS[category] = items
+  end
+  return CATEGORY_ITEMS[category]
+end
 
 --- Extended JSON type wrappers, valid wherever a value is written.
 local TYPE_WRAPPERS = {
@@ -296,70 +276,14 @@ local function string_text(str, text)
   return content and vim.treesitter.get_node_text(content, text) or nil
 end
 
---- Return the command-object pair whose value holds `node`, or nil when
---- `node` is not below one.
---- @param node    userdata
---- @param command userdata  the command object
---- @return userdata|nil
-local function argument_pair(node, command)
-  local n = node
-  while n and n:parent() do
-    local parent = n:parent()
-    if parent:id() == command:id() then
-      return n:type() == "pair" and n or nil
-    end
-    n = parent
-  end
-  return nil
-end
-
---- Return the `$stage` name of the pipeline stage `node` is inside, and
---- whether `node` is the stage object itself. A stage is an object that is
---- an element of the pipeline array, keyed by its one operator.
---- @param node     userdata  the object holding the position
---- @param pipeline userdata  the `pipeline` argument's array
---- @param text     string
---- @return string|nil stage, boolean at_stage_level
-local function stage_of(node, pipeline, text)
-  local n = node
-  while n do
-    local parent = n:parent()
-    if parent and parent:id() == pipeline:id() then
-      local first = n:type() == "object" and n:named_child(0) or nil
-      local key = first and first:type() == "pair" and string_text(first:field("key")[1], text) or nil
-      return key, n:id() == node:id()
-    end
-    n = parent
-  end
-  return nil, false
-end
-
 --- @class MongoCompletionContext
 --- @field kind       "command_key"|"database"|"collection"|"field"|"field_ref"
 --- @field db         string|nil     the database the command names
 --- @field collection string|nil     the collection its operation names
 --- @field operation  string|nil     the operation, when the command has one
 --- @field present    table<string, boolean>|nil  command_key: keys the command already has
---- @field operators  string[]|nil   field: the `$` operators this position takes
+--- @field categories string[]|nil   field: the operator categories this position takes, most specific first
 --- @field fields     boolean|nil    field: whether the collection's fields belong here
-
---- Return the `$` operators a nested key under `argument` may be, and
---- whether field names belong there too.
---- @param argument string
---- @param stage    string|nil   pipeline: the enclosing stage's operator
---- @param at_stage boolean      pipeline: whether the key opens a stage
---- @return string[], boolean
-local function nested_key_offer(argument, stage, at_stage)
-  if argument == "pipeline" then
-    if at_stage then return STAGE_OPERATORS, false end
-    return stage == "$match" and QUERY_OPERATORS or EXPRESSION_OPERATORS, true
-  elseif argument == "filter" then
-    return QUERY_OPERATORS, true
-  elseif argument == "update" then
-    return UPDATE_OPERATORS, true
-  end
-  return {}, true
-end
 
 --- Describe what should be completed at [start_col, end_col) on `row`.
 --- Returns nil when the position names nothing the server can answer.
@@ -416,19 +340,14 @@ function M.at_cursor(bufnr, row, start_col, end_col)
     return nil
   end
 
-  local argument = argument_pair(container, command)
+  local argument = symbols.argument_pair(container, command)
   local arg_name = argument and string_text(argument:field("key")[1], text)
   if not arg_name or OPAQUE_ARGUMENTS[arg_name] then return nil end
 
   if is_key then
-    local stage, at_stage = nil, false
-    if arg_name == "pipeline" then
-      local pipeline = argument:field("value")[1]
-      if not pipeline or pipeline:type() ~= "array" then return nil end
-      stage, at_stage = stage_of(container, pipeline, text)
-    end
+    ctx.categories, ctx.fields = symbols.key_categories(container, argument, text)
+    if not ctx.categories then return nil end
     ctx.kind = "field"
-    ctx.operators, ctx.fields = nested_key_offer(arg_name, stage, at_stage)
     return ctx
   end
 
@@ -513,7 +432,9 @@ function M.candidates(conn_id, ctx, add, on_ready)
   elseif ctx.kind == "collection" then
     collection_candidates(conn_id, ctx, add, on_ready)
   elseif ctx.kind == "field" then
-    for _, op in ipairs(ctx.operators) do add(op, "o", "operator") end
+    for _, category in ipairs(ctx.categories) do
+      for _, item in ipairs(category_items(category)) do add(item.word, "o", category, item.info) end
+    end
     if ctx.fields then
       for _, op in ipairs(TYPE_WRAPPERS) do add(op, "t", "extended json") end
       field_candidates(conn_id, ctx, "", add, on_ready)

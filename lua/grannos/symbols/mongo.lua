@@ -76,6 +76,100 @@ function M.command_target(command, source)
 end
 local command_target = M.command_target
 
+--- Return the command-object pair whose value holds `node`, or nil when
+--- `node` is not below one.
+--- @param node    userdata
+--- @param command userdata  the command object
+--- @return userdata|nil
+function M.argument_pair(node, command)
+  local n = node
+  while n and n:parent() do
+    local parent = n:parent()
+    if parent:id() == command:id() then
+      return n:type() == "pair" and n or nil
+    end
+    n = parent
+  end
+  return nil
+end
+
+--- Return the `$stage` name of the pipeline stage `node` is inside, and
+--- whether `node` is the stage object itself. A stage is an object that is
+--- an element of the pipeline array, keyed by its one operator.
+--- @param node     userdata  the object holding the position
+--- @param pipeline userdata  the `pipeline` argument's array
+--- @param source   integer|string
+--- @return string|nil stage, boolean at_stage_level
+local function stage_of(node, pipeline, source)
+  local n = node
+  while n do
+    local parent = n:parent()
+    if parent and parent:id() == pipeline:id() then
+      local first = n:type() == "object" and n:named_child(0) or nil
+      local key = first and first:type() == "pair" and string_text(first:field("key")[1], source) or nil
+      return key, n:id() == node:id()
+    end
+    n = parent
+  end
+  return nil, false
+end
+
+--- Return true when a pair keyed `$expr` holds `node` below `argument`: an
+--- aggregation expression inside a query.
+--- @param node     userdata
+--- @param argument userdata  the command-object pair
+--- @param source   integer|string
+--- @return boolean
+local function under_expr(node, argument, source)
+  local n = node
+  while n and n:id() ~= argument:id() do
+    if n:type() == "pair" and string_text(n:field("key")[1], source) == "$expr" then return true end
+    n = n:parent()
+  end
+  return false
+end
+
+--- Stages whose nested keys are accumulators first: `$group`'s fields, the
+--- `output` of `$bucket`, `$bucketAuto` and `$setWindowFields`.
+local ACCUMULATING_STAGES = {
+  ["$group"] = true, ["$bucket"] = true, ["$bucketAuto"] = true, ["$setWindowFields"] = true,
+}
+
+--- Return the operator categories (as `grannos.builtins` names them) a key
+--- of `object` may name, most specific first, and whether the collection's
+--- field names belong there too; nil when `argument`'s value is not what its
+--- name says (a `pipeline` that is not an array). Shared by completion, which
+--- offers the operators, and hover, which describes the one written.
+---
+---   - `filter`, and a `$match` stage: query operators;
+---   - `update`: update operators;
+---   - the top of a pipeline stage: stage names, and no fields;
+---   - inside a grouping stage: accumulators, then expression operators;
+---   - inside any other stage, or a `$expr`: expression operators;
+---   - anywhere else: no operator at all.
+--- @param object   userdata  the object the key is in
+--- @param argument userdata  the command-object pair holding it (see argument_pair)
+--- @param source   integer|string
+--- @return string[]|nil categories, boolean fields
+function M.key_categories(object, argument, source)
+  local name = string_text(argument:field("key")[1], source)
+  if name == "pipeline" then
+    local pipeline = argument:field("value")[1]
+    if not pipeline or pipeline:type() ~= "array" then return nil, false end
+    local stage, at_stage = stage_of(object, pipeline, source)
+    if at_stage then return { "stage" }, false end
+    if under_expr(object, argument, source) then return { "expression" }, true end
+    if stage == "$match" then return { "query" }, true end
+    if ACCUMULATING_STAGES[stage] then return { "accumulator", "expression" }, true end
+    return { "expression" }, true
+  elseif name == "filter" then
+    return { under_expr(object, argument, source) and "expression" or "query" }, true
+  elseif name == "update" then
+    return { "update" }, true
+  end
+  return {}, true
+end
+
 --- Return the scopes a field of this command sits under: its collection, and
 --- the database that collection lives in.
 --- @param db         string|nil

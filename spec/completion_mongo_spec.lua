@@ -172,33 +172,39 @@ describe("completion.mongo.at_cursor", function()
     assert.equals("orders", ctx.collection)
     assert.equals("mydb", ctx.db)
     assert.is_true(ctx.fields)
-    assert.is_true(has(ctx.operators, "$eq"))
-    assert.is_false(has(ctx.operators, "$set"))
+    assert.same({ "query" }, ctx.categories)
 
     ctx = classify({ '{"updateOne": "orders", "db": "mydb", "filter": {}, "update": {"$set": {"sta|' })
     assert.equals("field", ctx.kind)
-    assert.is_true(has(ctx.operators, "$set"))
-    assert.is_false(has(ctx.operators, "$eq"))
+    assert.same({ "update" }, ctx.categories)
 
     ctx = classify({ '{"find": "orders", "db": "mydb", "sort": {"|"}}' })
     assert.equals("field", ctx.kind)
-    assert.same({}, ctx.operators)
+    assert.same({}, ctx.categories)
+  end)
+
+  it("classifies a key under $expr as an expression position", function()
+    assert.same({ "expression" },
+      classify({ '{"find": "orders", "db": "mydb", "filter": {"$expr": {"|' }).categories)
+    assert.same({ "expression" },
+      classify({ '{"aggregate": "orders", "db": "mydb", "pipeline": [{"$match": {"$expr": {"|' }).categories)
   end)
 
   it("offers stage names at the top of a pipeline and expressions inside one", function()
     local ctx = classify({ '{"aggregate": "orders", "db": "mydb", "pipeline": [{"|' })
     assert.equals("field", ctx.kind)
     assert.is_false(ctx.fields)
-    assert.is_true(has(ctx.operators, "$group"))
+    assert.same({ "stage" }, ctx.categories)
 
     ctx = classify({ '{"aggregate": "orders", "db": "mydb", "pipeline": [{"$group": {"_id": "$status", "total": {"|' })
     assert.is_true(ctx.fields)
-    assert.is_true(has(ctx.operators, "$sum"))
-    assert.is_false(has(ctx.operators, "$group"))
+    assert.same({ "accumulator", "expression" }, ctx.categories)
+
+    ctx = classify({ '{"aggregate": "orders", "db": "mydb", "pipeline": [{"$project": {"x": {"|' })
+    assert.same({ "expression" }, ctx.categories)
 
     ctx = classify({ '{"aggregate": "orders", "db": "mydb", "pipeline": [{"$match": {"|' })
-    assert.is_true(has(ctx.operators, "$eq"))
-    assert.is_false(has(ctx.operators, "$sum"))
+    assert.same({ "query" }, ctx.categories)
   end)
 
   it("classifies a dollar value as a field reference, and any value in a pipeline", function()
@@ -284,6 +290,26 @@ describe("completion.omnifunc in a MongoDB buffer", function()
     assert.is_false(has(words, "$set"))
     assert.same({ "status" }, complete({ '{"find": "orders", "db": "mydb", "filter": {"st|' }))
     assert.same({ "$exists", "$expr" }, complete({ '{"find": "orders", "db": "mydb", "filter": {"$ex|' }))
+  end)
+
+  it("documents each operator from the specifications, under its category", function()
+    local by_word = {}
+    for _, item in ipairs(complete_items({ '{"aggregate": "orders", "db": "mydb", "pipeline": [{"$group": {"_id": "$s", "t": {"$|' })) do
+      by_word[item.word] = item
+    end
+    assert.equals("accumulator", by_word["$sum"].menu)
+    assert.is_truthy(by_word["$sum"].info:find("^%$sum: <expression>\n\nReturns a sum of numerical values"))
+    assert.equals("expression", by_word["$multiply"].menu)
+
+    by_word = {}
+    for _, item in ipairs(complete_items({ '{"updateOne": "orders", "db": "mydb", "filter": {}, "update": {"$|' })) do
+      by_word[item.word] = item
+    end
+    assert.equals("update", by_word["$set"].menu)
+    assert.is_truthy(by_word["$set"].info:find("Sets the value of a field", 1, true))
+    -- A $push modifier the specifications define no operator for: offered bare.
+    assert.equals("update", by_word["$each"].menu)
+    assert.is_nil(by_word["$each"].info)
   end)
 
   it("offers field references with the dollar sign", function()
