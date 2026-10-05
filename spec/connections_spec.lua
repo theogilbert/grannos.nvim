@@ -220,3 +220,22 @@ describe("connections.pick", function()
     assert.is_nil(got_key)
   end)
 end)
+
+describe("connections.driver_filetype", function()
+  local caps = { drivers = {
+    { driver = "prometheus", languages = { "promql" } },
+    { driver = "neo4j",      languages = { "cypher" } },
+    { driver = "generic" },
+  } }
+
+  it("maps a driver's declared language to its filetype", function()
+    assert.equals("promql", connections.driver_filetype(caps, "prometheus"))
+    assert.equals("cypher", connections.driver_filetype(caps, "neo4j"))
+  end)
+
+  it("falls back to sql without declared languages, caps or a known driver", function()
+    assert.equals("sql", connections.driver_filetype(caps, "generic"))
+    assert.equals("sql", connections.driver_filetype(caps, "unknown"))
+    assert.equals("sql", connections.driver_filetype(nil, "prometheus"))
+  end)
+end)

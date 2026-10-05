@@ -5,22 +5,13 @@
 -- top border overlaps the upper window's bottom border row; zindex wins on that row.
 local M = {}
 
-local log       = require("grannos.log")
-local table_fmt = require("grannos.table")
-local hl        = require("grannos.hl")
-local config    = require("grannos.config")
-local pane      = require("grannos.ui.detail_pane")
-
---- Return the Neovim filetype string for a given driver name.
---- @param driver string|nil
---- @return string
-local function driver_filetype(driver)
-  if not driver then return "sql" end
-  local d = driver:lower()
-  if d == "neo4j" or d:find("cypher") then return "cypher" end
-  if d == "mongodb" or d == "mongo" then return "mongo" end
-  return "sql"
-end
+local log         = require("grannos.log")
+local table_fmt   = require("grannos.table")
+local hl          = require("grannos.hl")
+local config      = require("grannos.config")
+local pane        = require("grannos.ui.detail_pane")
+local client      = require("grannos.client")
+local connections = require("grannos.connections")
 
 --- Format a millisecond duration as a human-readable seconds string.
 --- @param ms number
@@ -82,7 +73,7 @@ function M.open(conn_key, conn)
   local sql_buf = vim.api.nvim_create_buf(false, true)
   vim.bo[sql_buf].bufhidden  = "wipe"
   vim.bo[sql_buf].modifiable = false
-  vim.bo[sql_buf].filetype   = driver_filetype(conn and conn.driver)
+  vim.bo[sql_buf].filetype   = connections.driver_filetype(client.capabilities(), conn and conn.driver)
   pcall(vim.treesitter.start, sql_buf)
 
   -- Results preview (read-only).

@@ -616,6 +616,23 @@ local LANGUAGE_TO_FT = {
   mongo  = "mongo",
 }
 
+--- Return the Neovim filetype of the first language `driver` declares in the
+--- server capabilities, or "sql" when it declares none or is not listed.
+--- @param caps   table|nil  server capabilities (from client.capabilities)
+--- @param driver string|nil driver id
+--- @return string
+function M.driver_filetype(caps, driver)
+  for _, d in ipairs(caps and caps.drivers or {}) do
+    if d.driver == driver then
+      for _, lang in ipairs(d.languages or {}) do
+        if LANGUAGE_TO_FT[lang] then return LANGUAGE_TO_FT[lang] end
+      end
+      break
+    end
+  end
+  return "sql"
+end
+
 --- Interactively pick a saved connection and call `callback(key, params)`,
 --- from a single searchable float listing every connection saved for the
 --- active server (see ui/conn_picker.lua). Connections already open are
