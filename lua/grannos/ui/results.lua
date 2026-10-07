@@ -234,7 +234,13 @@ local function scroll_columns(direction)
       local cursor_vcol = vim.fn.virtcol(".")
       local new_vcol    = math.max(1, target + cursor_vcol - leftcol)
       local row         = vim.fn.line(".")
-      local byte_col    = vim.fn.virtcol2col(0, row, new_vcol) - 1
+      -- A line that doesn't reach the new column (the row-count label, a blank
+      -- line, a message) can't hold the cursor there, and Neovim would scroll
+      -- back to wherever it did land: carry it onto the table's header row.
+      if vim.fn.virtcol({ row, "$" }) <= new_vcol then
+        row = (buf_state.table_start or 2) + 1
+      end
+      local byte_col    = math.max(0, vim.fn.virtcol2col(0, row, new_vcol) - 1)
       vim.api.nvim_win_set_cursor(0, { row, byte_col })
       vim.fn.winrestview({ leftcol = target })
     end)
@@ -637,6 +643,21 @@ export_results = function(buf_state)
   end)
 end
 
+--- Return the index (in `buf_state.vis_columns`) of the single-result table
+--- column under the cursor, or nil when the cursor is off the table — on the
+--- row-count label, a message or histogram line, or past its right edge. The
+--- line matters as much as the column: on any other line the cursor's virtual
+--- column would still fall inside some column's span.
+--- @param buf_state table
+--- @return integer|nil
+local function column_at_cursor(buf_state)
+  local tbl = buf_state.table_data
+  if not tbl then return nil end
+  local data_line = vim.api.nvim_win_get_cursor(0)[1] - 1 - (buf_state.table_start or 2)
+  if data_line < 0 or data_line >= #tbl.text then return nil end
+  return table_fmt.get_column_at_cursor(tbl.columns_width, vim.fn.virtcol("."))
+end
+
 --- Return the raw LobPlaceholder cell under the cursor, or nil when the cursor
 --- isn't on a LOB cell. `table_data.lines` holds raw cell values (in the
 --- currently-rendered page and visible-column order) at the same 0-indexed
@@ -730,7 +751,7 @@ end
 --- @param buf_state table
 hide_column_at_cursor = function(buf_state)
   if not buf_state.table_data or not buf_state.raw_columns then return end
-  local col_idx  = table_fmt.get_column_at_cursor(buf_state.table_data.columns_width, vim.fn.virtcol("."))
+  local col_idx  = column_at_cursor(buf_state)
   local col_name = col_idx and buf_state.vis_columns[col_idx]
   if not col_name then return end
   table.remove(buf_state.vis_columns, col_idx)
@@ -745,7 +766,7 @@ end
 --- @param buf_state table
 local function show_column_hover(buf_state)
   if not buf_state.table_path or not buf_state.table_data or not buf_state.vis_columns then return end
-  local col_idx  = table_fmt.get_column_at_cursor(buf_state.table_data.columns_width, vim.fn.virtcol("."))
+  local col_idx  = column_at_cursor(buf_state)
   local col_name = col_idx and buf_state.vis_columns[col_idx]
   if not col_name then return end
 
@@ -1342,7 +1363,7 @@ end
 toggle_thousands_separator = function(buf_state)
   local col_name
   if buf_state.table_data then
-    local col_idx = table_fmt.get_column_at_cursor(buf_state.table_data.columns_width, vim.fn.virtcol("."))
+    local col_idx = column_at_cursor(buf_state)
     col_name = col_idx and buf_state.vis_columns[col_idx]
   elseif #buf_state.segments > 0 then
     local seg = segment_at_line(buf_state, vim.fn.line(".") - 1)

@@ -103,7 +103,11 @@ describe("results x hides the column under the cursor", function()
   it("does nothing off the table", function()
     local win = results_win()
     vim.api.nvim_set_current_win(win)
-    vim.api.nvim_win_set_cursor(win, { 1, 0 })  -- the row-count label
+    -- The row-count label, at the display column `name` has in the table: the
+    -- line, not just the column, must be the table's.
+    vim.api.nvim_win_set_cursor(win, { 1, 0 })
+    vim.cmd(("normal! %d|"):format(vcol_of("name")))
+    assert.is_true(vim.fn.virtcol(".") > 1)
     vim.api.nvim_feedkeys("x", "x", false)
     assert.same({ "id", "name", "email" }, col_selection.load(KEY, COLS) or COLS)
     assert.is_truthy(header():find("name", 1, true))

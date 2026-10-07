@@ -80,6 +80,8 @@ local function build_highlights()
     GrannosScrollbarThumb     = { fg = SCROLLBAR_FG },
     GrannosBoolTrue           = { fg = BOOL_TRUE_FG,  bold = true },
     GrannosBoolFalse          = { fg = BOOL_FALSE_FG, bold = true },
+    GrannosColumnShown        = { fg = BOOL_TRUE_FG },  -- column picker: ✔ beside a shown column
+    GrannosColumnHidden       = { fg = NULL_FG },       -- column picker: a hidden column and its ·
     [M.DIAGRAM_ROOT_TABLE]      = { fg = DIAGRAM_ROOT_TABLE_FG, bold = true },
   }
   for i, group in ipairs(M.DIAGRAM_TABLE_PALETTE) do
