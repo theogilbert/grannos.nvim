@@ -425,7 +425,7 @@ KEYMAPS ~
           connections file; selecting every column again in its own order
           forgets the entry.
           The picker is a checklist: one column per line, in display
-          order, `✔` beside a shown column and `·` beside a hidden one.
+          order, `●` beside a shown column and `○` beside a hidden one.
           The lines hold nothing but the names, so every motion and
           search works as usual (`/^user_`, `/_at$`, `n`, `*`, counts)
           and the line under the cursor is the column acted on.
@@ -437,7 +437,8 @@ KEYMAPS ~
           and `<` show or hide every column, `r` resets to the selection
           the picker opened with.  `u` undoes the last change (`<C-R>`
           redoes it — every change is applied and saved live, so undo is
-          what takes an accidental `<` back).
+          what takes an accidental `<` back).  `q` closes the picker;
+          Esc only clears the search highlight.
   x       Hide the column under the cursor, saved like a picker selection.
           Bring it back through the picker (`c`).
   o       Open the LOB cell under the cursor in a scratch buffer.
@@ -447,18 +448,18 @@ KEYMAPS ~
   gh      Toggle the documents-over-time histogram, see |grannos-histogram|.
   R       Re-run the query that produced the results, against the same
           connection, and show the new results here.
-  s       Open the session settings form for the results' connection —
-          the same form as `s` in the connections panel — so a time range
+  p       Open the session parameters form for the results' connection —
+          the same form as `p` in the connections panel — so a time range
           or sort can be changed and the query re-run with `R` without
           leaving the pane. In the form, `x` clears the field under the
           cursor; a setting saved empty reverts to its default.
-  p       Pin the pane. Its results stay as they are, and the next query
+  P       Pin the pane. Its results stay as they are, and the next query
           from the same buffer opens a new pane beside it — to the right
           under a `below` layout, so the two can be read side by side —
           instead of replacing them. The pinned buffer is renamed with a
           pin number (`grannos://results [...] (pin 1)`), stays listed,
           and every key still works on its own results: `R` re-runs its
-          query into it, `q` closes it. `p` on a pinned pane unpins it:
+          query into it, `q` closes it. `P` on a pinned pane unpins it:
           the next result from its buffer shows there again, and a pane
           that had taken its place is pinned instead, keeping its result.
   q       Close the results window.
@@ -766,7 +767,7 @@ require("grannos").open_session_settings()
     Open the session settings form for the current buffer's connection:
     the one a query buffer is attached to, or, from a results pane, the
     one its results came from. Shows a warning if the buffer is neither.
-    The same form as `s` in the connections panel and the results pane —
+    The same form as `p` in the connections panel and the results pane —
     see |grannos-results| for what it holds.
 
                                   *grannos.open_session_settings_for()*

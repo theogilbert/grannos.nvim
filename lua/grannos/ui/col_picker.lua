@@ -4,7 +4,7 @@
 -- names, so the line under the cursor is the column acted on and every
 -- native motion and search works unchanged: j/k, gg/G, counts, / ? n N *,
 -- 'hlsearch'. Whether a column is shown is drawn beside it in the sign
--- column (✔ shown, · hidden, its name dimmed), never in the text, so `/`
+-- column (● shown, ○ hidden, its name dimmed), never in the text, so `/`
 -- matches names alone and `/^user_` or `/_at$` mean what they say.
 --
 -- Space/Tab/Enter toggle the column under the cursor; in visual mode, every
@@ -18,12 +18,18 @@
 --     (and the saved selection) — undo is what takes it back. Vim's own undo
 --     can't: the buffer is rewritten, not edited, and is not modifiable.
 -- r   reset to the selection the picker was opened with.
--- q/Esc close.
+-- Esc clears the search highlight; it never closes, so a stray Esc after a
+--     search or a visual selection keeps the picker open.
+-- q   close.
 local hl = require("grannos.hl")
 
 local M = {}
 
 local ns_id = vim.api.nvim_create_namespace("grannos_col_picker")
+
+--- Sign beside a shown column, and beside a hidden one.
+local SHOWN_SIGN  = "●"
+local HIDDEN_SIGN = "○"
 
 --- Most undo steps kept; older ones are dropped.
 local HISTORY_MAX = 100
@@ -58,10 +64,10 @@ local function render()
   for i, c in ipairs(p.order) do
     if p.shown[c] then
       vim.api.nvim_buf_set_extmark(p.buf, ns_id, i - 1, 0,
-        { sign_text = "✔", sign_hl_group = "GrannosColumnShown" })
+        { sign_text = SHOWN_SIGN, sign_hl_group = "GrannosColumnShown" })
     else
       vim.api.nvim_buf_set_extmark(p.buf, ns_id, i - 1, 0,
-        { sign_text = "·", sign_hl_group = "GrannosColumnHidden",
+        { sign_text = HIDDEN_SIGN, sign_hl_group = "GrannosColumnHidden",
           end_col = #c, hl_group = "GrannosColumnHidden" })
     end
   end
@@ -294,8 +300,8 @@ function M.open(all_cols, vis_cols, on_change)
   for _, c in ipairs(all_cols) do name_w = math.max(name_w, vim.api.nvim_strwidth(c)) end
   local digits  = #tostring(#all_cols)
   local title_w = #(" Columns  %s of %s shown "):format(("9"):rep(digits), ("9"):rep(digits))
-  -- 2 sign-column cells, the name, and a cell of right padding.
-  local width   = math.min(math.max(name_w + 3, title_w), vim.o.columns - 4)
+  -- 2 sign-column cells, the gap after them, the name, and a cell of right padding.
+  local width   = math.min(math.max(name_w + 4, title_w), vim.o.columns - 4)
   local height  = math.max(1, math.min(#all_cols, vim.o.lines - 8))
 
   local win = vim.api.nvim_open_win(buf, true, {
@@ -313,6 +319,8 @@ function M.open(all_cols, vis_cols, on_change)
 
   vim.api.nvim_win_set_hl_ns(win, hl.NS_ID)
   vim.wo[win].signcolumn = "yes:1"
+  -- The sign column, then a space, so a name never sits flush against its mark.
+  vim.wo[win].statuscolumn = "%s "
   vim.wo[win].cursorline = true
   vim.wo[win].wrap       = false
 
@@ -326,7 +334,7 @@ function M.open(all_cols, vis_cols, on_change)
   end
 
   map("n", "q",       close,          "Close")
-  map("n", "<Esc>",   close,          "Close")
+  map("n", "<Esc>",   function() vim.cmd("nohlsearch") end, "Clear the search highlight")
   map("n", "<Space>", toggle_current, "Show/hide the column")
   map("n", "<Tab>",   toggle_current, "")
   map("n", "<CR>",    toggle_current, "")

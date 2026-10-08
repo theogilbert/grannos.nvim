@@ -157,8 +157,8 @@ Results appear in a split window with aligned columns and a row count. For DML q
 | `c` | Select which columns to display |
 | `[` / `]` | Previous / next page |
 | `R` | Re-run the query that produced the results |
-| `s` | Open the session settings for the results' connection (e.g. the time range) |
-| `p` | Pin the pane: keep its results and show the next query's result beside it |
+| `p` | Open the session parameters for the results' connection (e.g. the time range) |
+| `P` | Pin the pane: keep its results and show the next query's result beside it |
 | `q` | Close the results window |
 | `g?` | Show keymap reference |
 
@@ -377,7 +377,7 @@ db.query_log("prod-mssql")
 
 -- Open the session settings form (e.g. a time range) for the current buffer's
 -- connection — from a results pane, the connection its results came from —
--- or for conn_key specifically. The same form as `s` in either pane.
+-- or for conn_key specifically. The same form as `p` in either pane.
 db.open_session_settings()
 db.open_session_settings_for("prod-mssql")
 

@@ -63,14 +63,14 @@ describe("ui.col_picker", function()
     it("lists bare names, one per line, with the state in the sign column", function()
       open({ "id", "email" })
       assert.same(COLS, lines())
-      assert.same({ "✔", "·", "✔", "·", "·" }, signs())
+      assert.same({ "●", "○", "●", "○", "○" }, signs())
       assert.equal(" Columns  2 of 5 shown ", title())
     end)
 
     it("slots a hidden column after the column it follows in the result", function()
       open({ "email", "id" })
       assert.same({ "email", "created_at", "updated_at", "id", "name" }, lines())
-      assert.same({ "✔", "·", "·", "✔", "·" }, signs())
+      assert.same({ "●", "○", "○", "●", "○" }, signs())
     end)
 
     it("a hidden first column opens at the top", function()
@@ -196,9 +196,25 @@ describe("ui.col_picker", function()
     end)
   end)
 
+  it("draws a gap between the sign and the name", function()
+    open({ "name" })
+    local col = vim.api.nvim_eval_statusline(vim.wo.statuscolumn,
+      { winid = 0, use_statuscol_lnum = 2 }).str
+    -- The sign cell, its padding cell, then the gap.
+    assert.equal("●  ", col)
+  end)
+
   it("q closes", function()
     open()
     feed("q")
     assert.equal("", vim.api.nvim_win_get_config(0).relative)
+  end)
+
+  it("Esc does not close", function()
+    open()
+    feed("/name<CR><Esc>")
+    assert.is_true(vim.api.nvim_win_get_config(0).relative ~= "")
+    feed("V<Esc><Esc>")
+    assert.is_true(vim.api.nvim_win_get_config(0).relative ~= "")
   end)
 end)

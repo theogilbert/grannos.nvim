@@ -116,11 +116,11 @@ describe("results R re-runs the query", function()
     assert.truthy(notices[1]:find("connection"))
   end)
 
-  it("s opens the session settings for the results' connection", function()
+  it("p opens the session parameters for the results' connection", function()
     show(source_buf(), 1)
     session_opened = {}
     vim.api.nvim_set_current_win(results_win())
-    vim.api.nvim_feedkeys("s", "x", false)
+    vim.api.nvim_feedkeys("p", "x", false)
     assert.same({ CONN_KEY }, session_opened)
   end)
 
