@@ -57,6 +57,21 @@ function M.show_running(bufnr, line)
   return { bufnr = bufnr, mark_id = mark_id }
 end
 
+--- Remove every finished mark (success or error) on lines `first`..`last`
+--- (0-indexed, inclusive), so a batch run over them shows no stale result
+--- while its statements wait their turn. A mark still tracking a running
+--- request is kept: its query is in flight, and cancel finds it by its mark.
+--- @param bufnr integer
+--- @param first integer
+--- @param last  integer
+function M.clear_range(bufnr, first, last)
+  if not vim.api.nvim_buf_is_valid(bufnr) then return end
+  local by_buf = running[bufnr] or {}
+  for _, m in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, NS, { first, 0 }, { last, -1 }, {})) do
+    if not by_buf[m[1]] then vim.api.nvim_buf_del_extmark(bufnr, NS, m[1]) end
+  end
+end
+
 --- Update the gutter mark to the success icon.
 --- @param handle GutterHandle|nil
 function M.show_success(handle)

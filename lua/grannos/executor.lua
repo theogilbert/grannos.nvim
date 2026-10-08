@@ -235,6 +235,10 @@ function M.run(conn, query, bufnr, first_line)
     end
 
     if queries and #queries > 1 then
+      -- Every statement is about to re-run: clear their old marks now rather
+      -- than as each one's turn comes, so none shows a result from before.
+      local nlines = select(2, query:gsub("\n", ""))
+      gutter.clear_range(bufnr, first_line, first_line + nlines)
       results.begin_batch(#queries)
       run_batch(queries, conn, 1, bufnr, first_line, false)
     else
