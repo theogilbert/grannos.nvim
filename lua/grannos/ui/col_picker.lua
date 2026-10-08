@@ -4,7 +4,7 @@
 -- names, so the line under the cursor is the column acted on and every
 -- native motion and search works unchanged: j/k, gg/G, counts, / ? n N *,
 -- 'hlsearch'. Whether a column is shown is drawn beside it in the sign
--- column (● shown, ○ hidden, its name dimmed), never in the text, so `/`
+-- column (󰄲 shown, 󰄱 hidden, its name dimmed), never in the text, so `/`
 -- matches names alone and `/^user_` or `/_at$` mean what they say.
 --
 -- Space/Tab/Enter toggle the column under the cursor; in visual mode, every
@@ -28,8 +28,8 @@ local M = {}
 local ns_id = vim.api.nvim_create_namespace("grannos_col_picker")
 
 --- Sign beside a shown column, and beside a hidden one.
-local SHOWN_SIGN  = "●"
-local HIDDEN_SIGN = "○"
+local SHOWN_SIGN  = "󰄲"  -- nf-md-checkbox_marked
+local HIDDEN_SIGN = "󰄱"  -- nf-md-checkbox_blank_outline
 
 --- Most undo steps kept; older ones are dropped.
 local HISTORY_MAX = 100

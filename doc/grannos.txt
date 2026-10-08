@@ -425,7 +425,7 @@ KEYMAPS ~
           connections file; selecting every column again in its own order
           forgets the entry.
           The picker is a checklist: one column per line, in display
-          order, `●` beside a shown column and `○` beside a hidden one.
+          order, `󰄲` beside a shown column and `󰄱` beside a hidden one.
           The lines hold nothing but the names, so every motion and
           search works as usual (`/^user_`, `/_at$`, `n`, `*`, counts)
           and the line under the cursor is the column acted on.
