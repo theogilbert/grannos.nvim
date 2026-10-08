@@ -156,6 +156,7 @@ Results appear in a split window with aligned columns and a row count. For DML q
 | `H` / `L` | Scroll left / right one column |
 | `c` | Select which columns to display |
 | `[` / `]` | Previous / next page |
+| `e` | Export the results: pretty, JSON (flattened or structured), CSV or Markdown |
 | `R` | Re-run the query that produced the results |
 | `p` | Open the session parameters for the results' connection (e.g. the time range) |
 | `P` | Pin the pane: keep its results and show the next query's result beside it |

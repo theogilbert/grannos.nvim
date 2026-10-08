@@ -624,7 +624,10 @@ end
 --- @param buf_state table
 export_results = function(buf_state)
   if not buf_state.raw_columns or not buf_state.raw_rows then return end
-  vim.ui.select(export.FORMATS, { prompt = "Export results as:" }, function(format)
+  vim.ui.select(export.FORMATS, {
+    prompt      = "Export results as:",
+    format_item = function(f) return export.LABELS[f] end,
+  }, function(format)
     if not format then return end
     vim.notify("grannos: exporting…", vim.log.levels.INFO)
     export.run_async(function()

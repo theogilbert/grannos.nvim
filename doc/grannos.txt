@@ -441,6 +441,16 @@ KEYMAPS ~
           Esc only clears the search highlight.
   x       Hide the column under the cursor, saved like a picker selection.
           Bring it back through the picker (`c`).
+  e       Export the whole result set (every page, the displayed columns in
+          their displayed order) into a scratch buffer, in a format picked
+          from a list: the pane's own table (pretty), JSON (flattened), JSON
+          (structured), CSV or Markdown.  JSON (flattened) has one key per
+          column, as shown.  JSON (structured) unfolds the column names a
+          document database flattens nested fields into — `address.city`,
+          `items[0].sku` — back into nested objects and arrays.  Values
+          stay as the pane received them (MongoDB, Elasticsearch and Neo4j
+          send every value as a string, and an array of plain values as
+          one `{a, b}` string), and a field one document lacks is `null`.
   o       Open the LOB cell under the cursor in a scratch buffer.
   S       Save the LOB cell under the cursor to a file on disk (prompted).
   [       Go to the previous page of results.

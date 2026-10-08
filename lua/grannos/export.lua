@@ -5,17 +5,28 @@ local table_fmt = require("grannos.table")
 local M = {}
 
 --- Export formats offered to the user, in display order.
-M.FORMATS = { "pretty", "json", "csv", "markdown" }
+M.FORMATS = { "pretty", "json", "json_structured", "csv", "markdown" }
+
+--- What the format picker shows for each format.
+M.LABELS = {
+  pretty          = "pretty",
+  json            = "JSON (flattened)",
+  json_structured = "JSON (structured)",
+  csv             = "csv",
+  markdown        = "markdown",
+}
 
 --- Neovim filetype to assign to the scratch buffer for each format ("" = none).
 M.FILETYPES = {
-  json     = "json",
+  json            = "json",
+  json_structured = "json",
   csv      = "csv",
   pretty   = "",
   markdown = "markdown",
 }
 
 local to_json      -- forward declarations; defined below
+local to_json_structured
 local to_csv
 local to_pretty
 local to_markdown
@@ -42,6 +53,7 @@ end
 --- @return string
 function M.render(format, columns, rows)
   if format == "json"     then return to_json(columns, rows) end
+  if format == "json_structured" then return to_json_structured(columns, rows) end
   if format == "csv"      then return to_csv(columns, rows) end
   if format == "pretty"   then return to_pretty(columns, rows) end
   if format == "markdown" then return to_markdown(columns, rows) end
@@ -131,6 +143,172 @@ to_json = function(columns, rows)
       table.insert(field_strs, "    " .. key .. ": " .. val)
     end
     table.insert(row_strs, "  {\n" .. table.concat(field_strs, ",\n") .. "\n  }")
+    maybe_yield(ri)
+  end
+  if #row_strs == 0 then return "[]" end
+  return "[\n" .. table.concat(row_strs, ",\n") .. "\n]"
+end
+
+--- Split a flattened column name into its path: `a.b[0].c` → { "a", "b", 0, "c" }.
+--- The inverse of the backend's flattening (`grannos-py` `tabular.flatten_docs`),
+--- which joins an object's fields with `.` and indexes an array of objects
+--- with `[i]`. A name with no such syntax is a path of one segment.
+--- @param name string
+--- @return (string|integer)[]
+local function split_path(name)
+  local path = {}
+  for part in (name .. "."):gmatch("(.-)%.") do
+    local base, rest = part:match("^(.-)(%[%d+%].*)$")
+    if base and rest:gsub("%[%d+%]", "") == "" then
+      if base ~= "" then path[#path + 1] = base end
+      for idx in rest:gmatch("%[(%d+)%]") do path[#path + 1] = tonumber(idx) end
+    else
+      path[#path + 1] = part
+    end
+  end
+  return path
+end
+
+--- A fresh node of the document tree `to_json_structured` builds. An object
+--- keeps its keys in insertion order, so the output follows column order.
+--- @param kind "object"|"array"
+--- @return table
+local function new_node(kind)
+  return { kind = kind, keys = {}, vals = {} }
+end
+
+--- Whether `v` is a node built by `new_node` (as opposed to a cell value).
+--- @param v any
+--- @return boolean
+local function is_node(v)
+  return type(v) == "table" and (v.kind == "object" or v.kind == "array") and v.vals ~= nil
+end
+
+--- Store `val` at `key` of `node`, recording a new object key's position.
+--- @param node table
+--- @param key  string|integer  an object key, or a 0-based array index
+--- @param val  any
+local function node_set(node, key, val)
+  if node.kind == "array" then
+    node.vals[key + 1] = val
+    node.keys[1] = math.max(node.keys[1] or 0, key + 1)  -- the array's length
+  else
+    if node.vals[key] == nil then node.keys[#node.keys + 1] = key end
+    node.vals[key] = val
+  end
+end
+
+--- Return the value at `key` of `node`, or nil.
+--- @param node table
+--- @param key  string|integer  an object key, or a 0-based array index
+--- @return any
+local function node_get(node, key)
+  return node.vals[node.kind == "array" and key + 1 or key]
+end
+
+--- Whether `key` can address `node`: an index an array, a name an object.
+--- @param node table
+--- @param key  string|integer
+--- @return boolean
+local function fits(node, key)
+  return (type(key) == "number") == (node.kind == "array")
+end
+
+--- Whether `node` holds nothing but NULLs, however deep.
+--- @param node table  a document-tree node
+--- @return boolean
+local function only_nulls(node)
+  for _, v in pairs(node.vals) do
+    if is_node(v) then
+      if not only_nulls(v) then return false end
+    elseif v ~= vim.NIL then
+      return false
+    end
+  end
+  return true
+end
+
+--- Place `val` at `path` under `root`, creating the objects and arrays along
+--- the way. The same field can be an object in one document and a value, or
+--- absent, in another, and the backend fills every gap with NULL — so a NULL
+--- never overrides anything another column put there, a container replaces
+--- a NULL, and a value replaces a container holding nothing but NULLs. A
+--- clash of two real values keeps the column flat on the row object, under
+--- its full `name`, so no value is ever dropped.
+--- @param root table
+--- @param path (string|integer)[]
+--- @param name string  the column name `path` was split from
+--- @param val  any
+local function place(root, path, name, val)
+  local is_null = val == vim.NIL
+  --- Keep a clashing value flat on the row object; a clashing NULL is noise.
+  local function clash()
+    if not is_null then node_set(root, name, val) end
+  end
+  local node = root
+  for i = 1, #path - 1 do
+    local seg = path[i]
+    if not fits(node, seg) then return clash() end
+    local child = node_get(node, seg)
+    if child == nil or (child == vim.NIL and not is_null) then
+      child = new_node(type(path[i + 1]) == "number" and "array" or "object")
+      node_set(node, seg, child)
+    elseif not is_node(child) then
+      return clash()
+    end
+    node = child
+  end
+  local last = path[#path]
+  if not fits(node, last) then return clash() end
+  local existing = node_get(node, last)
+  if existing == nil then
+    node_set(node, last, val)
+  elseif not is_null then
+    if existing == vim.NIL or (is_node(existing) and only_nulls(existing)) then
+      node_set(node, last, val)
+    else
+      clash()
+    end
+  end
+end
+
+--- Encode a document-tree node (or a cell value) as indented JSON.
+--- @param v      any
+--- @param indent string  the indentation of the line `v` starts on
+--- @return string
+local function encode_node(v, indent)
+  if not is_node(v) then return vim.json.encode(v == nil and vim.NIL or v) end
+  local inner, parts = indent .. "  ", {}
+  if v.kind == "array" then
+    for i = 1, v.keys[1] or 0 do
+      parts[#parts + 1] = inner .. encode_node(v.vals[i], inner)
+    end
+    if #parts == 0 then return "[]" end
+    return "[\n" .. table.concat(parts, ",\n") .. "\n" .. indent .. "]"
+  end
+  for _, k in ipairs(v.keys) do
+    parts[#parts + 1] = inner .. vim.json.encode(k) .. ": " .. encode_node(v.vals[k], inner)
+  end
+  if #parts == 0 then return "{}" end
+  return "{\n" .. table.concat(parts, ",\n") .. "\n" .. indent .. "}"
+end
+
+--- Serialize rows as a JSON array of nested documents: each flattened column
+--- name (`address.city`, `items[0].sku`) is unfolded back into the objects
+--- and arrays it was flattened from, keys in column order.
+--- @param columns string[]
+--- @param rows    any[][]
+--- @return string
+to_json_structured = function(columns, rows)
+  local paths = {}
+  for i, col in ipairs(columns) do paths[i] = split_path(col) end
+  local row_strs = {}
+  for ri, row in ipairs(rows) do
+    local doc = new_node("object")
+    for i in ipairs(columns) do
+      place(doc, paths[i], columns[i], row[i] == nil and vim.NIL or row[i])
+    end
+    row_strs[#row_strs + 1] = "  " .. encode_node(doc, "  ")
     maybe_yield(ri)
   end
   if #row_strs == 0 then return "[]" end
