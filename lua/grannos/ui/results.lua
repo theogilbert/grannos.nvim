@@ -464,7 +464,7 @@ local function show_source_query(buf_state)
     vim.bo[fbuf].filetype = buf_state.query_ft
     pcall(vim.treesitter.start, fbuf)
   end
-  local ui     = vim.api.nvim_list_uis()[1]
+  local ui     = { width = vim.o.columns, height = vim.o.lines }
   local width  = math.min(math.max(20, math.floor(ui.width * 0.6)), 120)
   local height = math.min(#lines + 2, math.floor(ui.height * 0.6))
   local row    = math.floor((ui.height - height) / 2)
@@ -1253,6 +1253,11 @@ function M.set_conn_name(key, driver_label, src_bufnr)
   buf_state.query_ft      = nil
   buf_state.src_bufnr     = nil
   buf_state.first_line    = nil
+  -- A previous batch's statements: left in place they would outlive it, and
+  -- `gq` (which prefers a segment's SQL) would show one of them for this
+  -- query. `begin_batch` starts a fresh list when this run is a batch too.
+  buf_state.segments      = {}
+  buf_state.batch_total   = nil
   state.active_src = buf_key
 end
 

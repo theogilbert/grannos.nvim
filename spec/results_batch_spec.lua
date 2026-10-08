@@ -58,3 +58,44 @@ describe("results batch progress", function()
     assert.same({}, progress_lines())
   end)
 end)
+
+describe("results gq after a batch", function()
+  --- The text of the floating window `gq` opened.
+  --- @return string
+  local function float_text()
+    local win = vim.api.nvim_get_current_win()
+    assert.is_true(vim.api.nvim_win_get_config(win).relative ~= "")
+    return table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(win), 0, -1, false), "\n")
+  end
+
+  --- Press `gq` with the cursor on the last line of the results window.
+  local function press_gq()
+    for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+      if vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w)):find("grannos://results", 1, true) then
+        vim.api.nvim_set_current_win(w)
+      end
+    end
+    vim.api.nvim_win_set_cursor(0, { vim.api.nvim_buf_line_count(0), 0 })
+    vim.api.nvim_feedkeys("gq", "x", false)
+  end
+
+  after_each(function()
+    for _, w in ipairs(vim.api.nvim_list_wins()) do
+      if vim.api.nvim_win_get_config(w).relative ~= "" then pcall(vim.api.nvim_win_close, w, true) end
+    end
+  end)
+
+  it("shows the query that ran last, not a statement of the earlier batch", function()
+    results.set_conn_name(nil, nil, nil)
+    results.set_query("SELECT 1;\nSELECT 2;", "sql")
+    results.begin_batch(2)
+    results.append_batch_result(1, 2, { "a" }, { { 1 } }, 1, 1, 1.0, "SELECT 1;")
+    results.append_batch_result(2, 2, { "a" }, { { 2 } }, 1, 1, 1.0, "SELECT 2;")
+
+    results.set_conn_name(nil, nil, nil)
+    results.set_query("SELECT 3", "sql")
+    results.show_results({ "a" }, { { 3 } }, 1, 1, 1.0)
+    press_gq()
+    assert.equal("SELECT 3", float_text())
+  end)
+end)
