@@ -68,6 +68,10 @@ require("grannos").setup({
   --          (~/.local/share/grannos/queries/ on most systems)
   -- queries_dir = vim.fn.expand("~/.local/share/grannos/queries"),
 
+  -- Attach a file to the connection named by a `grannos: connection=…`
+  -- comment in its first or last 5 lines when it is opened.
+  auto_attach = true,
+
   keymaps = {
     -- Describe the symbol (or panel item) under the cursor. In the connections
     -- panel this shows the connection details / error float.
@@ -130,6 +134,14 @@ From the buffer you want to query:
 ```
 
 A picker floats over the editor: a search box on top, every saved connection listed below as `group/name (driver)`. Connections already open come first, marked with `●`; the buffer's current one is highlighted. Type to filter, `<Down>`/`<Up>` (or `<C-n>`/`<C-p>`) to move, `<CR>` to select, `<Esc>` to clear the filter then close. Picking an open connection just links the buffer to it; picking a closed one connects (prompting for the password if needed) and then links. `[+ New connection]` at the end opens the new-connection wizard. Once linked, a "Connected to name (driver)" label appears at the bottom of the window, followed by the connection's session settings in parentheses when its driver has any. Linking also appends an empty last line to the buffer if it has none, so the label never hides the last line of content.
+
+To have a query file attach itself when opened, put a directive comment in its first or last 5 lines, using the language's own comment leader:
+
+```sql
+-- grannos: connection=analytics/prod
+```
+
+The value is the connection's `group/name` (or just `name` when ungrouped, or when no other saved connection shares it). Opening the file starts the backend if needed, connects (prompting for the password if needed) and links the buffer; a connection already open is reused. Set `auto_attach = false` in `setup()` to turn this off.
 
 ### 3. Execute queries
 

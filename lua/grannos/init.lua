@@ -158,6 +158,18 @@ function M.setup(opts)
     local name = state.buf_conns[bufnr]
     return name and conn_display_label(name)
   end)
+  if config.options.auto_attach then
+    vim.api.nvim_create_autocmd("BufReadPost", {
+      group    = vim.api.nvim_create_augroup("GrannosAutoAttach", { clear = true }),
+      callback = function(ev) vim.schedule(function() M.auto_attach(ev.buf) end) end,
+    })
+    -- Files read before setup() ran (a lazy-loaded plugin) missed the autocmd.
+    for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+      if vim.api.nvim_buf_is_loaded(bufnr) then
+        vim.schedule(function() M.auto_attach(bufnr) end)
+      end
+    end
+  end
 end
 
 
@@ -217,25 +229,12 @@ function M.attach(name)
     if not params then
       -- Search the active server's connections by display name (:DbAttach <name>).
       local active_caps = client.capabilities()
-      local server = active_caps and (active_caps.server or "") or ""
-      local server_data = connections.load(server)
-      for driver_id, driver_data in pairs(server_data) do
-        for group, group_conns in pairs(driver_data.groups or {}) do
-          for conn_name, conn_params in pairs(group_conns) do
-            if conn_name == name then
-              resolved_key = connections.conn_key(server, driver_id, group, conn_name)
-              params = conn_params
-              break
-            end
-          end
-          if params then break end
-        end
-        if params then break end
+      local err
+      resolved_key, params, err = connections.find(active_caps and (active_caps.server or "") or "", name)
+      if not resolved_key then
+        vim.notify(("grannos: connection %q %s"):format(name, err), vim.log.levels.ERROR)
+        return
       end
-    end
-    if not params then
-      vim.notify(("grannos: connection %q not found"):format(name), vim.log.levels.ERROR)
-      return
     end
     M.ensure_backend_with_caps(function(caps)
       local _, driver = connections.conn_parts(resolved_key)
@@ -263,16 +262,67 @@ function M.attach(name)
   end
 end
 
+-- Buffers waiting on a connect that auto_attach started: { [conn_key] = bufnr[] }.
+-- Several files naming the same connection open at once share one connect.
+local auto_pending = {}
+
+--- Attach `bufnr` to the connection its grannos directive comment names
+--- (see directive.lua), connecting first when that connection is not open.
+--- No-op for special buffers, buffers already attached, and buffers without
+--- a directive; a directive naming no saved connection is reported.
+--- @param bufnr integer
+function M.auto_attach(bufnr)
+  if not vim.api.nvim_buf_is_valid(bufnr) or vim.bo[bufnr].buftype ~= "" or state.buf_conns[bufnr] then
+    return
+  end
+  local name = require("grannos.directive").connection(bufnr)
+  if not name then return end
+
+  --- Attach every buffer still waiting on `key` and still unattached.
+  --- @param key string
+  --- @param bufnrs integer[]
+  local function assign(key, bufnrs)
+    for _, b in ipairs(bufnrs) do
+      if vim.api.nvim_buf_is_valid(b) and not state.buf_conns[b] then set_buf_conn(b, key) end
+    end
+  end
+
+  M.ensure_backend_with_caps(function(caps)
+    local key, params, err = connections.find(caps.server or "", name)
+    if not key then
+      vim.notify(("grannos: connection %q (named in %s) %s")
+        :format(name, vim.fn.fnamemodify(vim.api.nvim_buf_get_name(bufnr), ":~:."), err),
+        vim.log.levels.WARN)
+      return
+    end
+    if state.conns[key] then return assign(key, { bufnr }) end
+    if auto_pending[key] then return table.insert(auto_pending[key], bufnr) end
+    auto_pending[key] = { bufnr }
+    local _, driver = connections.conn_parts(key)
+    connections.prompt_password(caps, driver, params, function(params_with_pw)
+      if not params_with_pw then auto_pending[key] = nil return end
+      M._do_connect(key, params_with_pw, function()
+        assign(key, auto_pending[key] or {})
+        auto_pending[key] = nil
+      end, function() auto_pending[key] = nil end)
+    end)
+  end)
+end
+
 --- Set the loading indicator on the connections panel, start the backend, then send connect.
 --- @param name         string
 --- @param params       table
 --- @param after_connect fun(name: string)|nil
-function M._do_connect(name, params, after_connect)
+--- @param on_error      fun()|nil  called instead of after_connect when the connection could not be opened
+function M._do_connect(name, params, after_connect, on_error)
   connections_panel.set_conn_loading(name)
   local ok = M.ensure_backend_with_caps(function()
-    M._send_connect(name, params, after_connect)
+    M._send_connect(name, params, after_connect, on_error)
   end)
-  if not ok then connections_panel.clear_conn_loading(name) end
+  if not ok then
+    connections_panel.clear_conn_loading(name)
+    if on_error then on_error() end
+  end
 end
 
 -- Fields in connection params that must not be forwarded to the server.
@@ -323,7 +373,8 @@ end
 --- @param name          string
 --- @param params        table
 --- @param after_connect fun(name: string)|nil
-function M._send_connect(name, params, after_connect)
+--- @param on_error      fun()|nil  called instead of after_connect when the connect fails
+function M._send_connect(name, params, after_connect, on_error)
   local _, driver, _, _ = connections.conn_parts(name)
   local server_params = { driver = driver }
   for k, v in pairs(params) do
@@ -343,6 +394,7 @@ function M._send_connect(name, params, after_connect)
     if err then
       vim.notify(("grannos: %q failed — %s"):format(display, err), vim.log.levels.ERROR)
       connections_panel.set_conn_error(name, err)
+      if on_error then on_error() end
       return
     end
     state.conns[name] = { conn_id = result.connection_id, driver = driver, key = name, driver_label = driver_label }

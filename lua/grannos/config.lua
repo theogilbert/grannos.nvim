@@ -26,6 +26,11 @@ M.defaults = {
   -- Defaults to $XDG_DATA_HOME/grannos/queries/
   queries_dir = nil,
 
+  -- Attach a query file to the saved connection named by a directive comment
+  -- in its first or last 5 lines when it is opened, connecting first if needed:
+  --   -- grannos: connection=group/name
+  auto_attach = true,
+
   keymaps = {
     -- Describe the symbol (or panel item) under the cursor.
     hover_key = "K",

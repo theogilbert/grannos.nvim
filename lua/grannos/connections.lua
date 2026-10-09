@@ -148,6 +148,32 @@ function M.get(key)
   return ((d.groups or {})[group] or {})[name]
 end
 
+--- Resolve a user-typed connection name on `server` to its key and params.
+--- `name` matches a connection's display name ("group/name", or "name" when
+--- ungrouped), or else its bare name when exactly one connection has it.
+--- @param server string
+--- @param name   string
+--- @return string|nil key     nil when nothing (or more than one) matches
+--- @return table|nil  params
+--- @return string|nil err     "not found" or "ambiguous" when key is nil
+function M.find(server, name)
+  local exact, bare = {}, {}
+  for driver, driver_data in pairs(M.load(server)) do
+    if type(driver_data) == "table" then
+      for group, group_conns in pairs(driver_data.groups or {}) do
+        for conn_name, params in pairs(group_conns) do
+          local key = M.conn_key(server, driver, group, conn_name)
+          if M.conn_display_name(key) == name then table.insert(exact, { key, params }) end
+          if conn_name == name then table.insert(bare, { key, params }) end
+        end
+      end
+    end
+  end
+  local matches = #exact > 0 and exact or bare
+  if #matches == 1 then return matches[1][1], matches[1][2], nil end
+  return nil, nil, #matches == 0 and "not found" or "ambiguous"
+end
+
 --- Ensure the server → driver → group path exists in `data` and write the connection params.
 --- @param data         table   mutable file-data table
 --- @param server       string
