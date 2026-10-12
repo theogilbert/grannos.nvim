@@ -752,6 +752,7 @@ end
 ---   .title    string           window title (no surrounding spaces — they are added here)
 ---   .render   fn(buf, item)    populate the buffer
 ---   .estimate fn(item)→number  estimated line count for window height
+---   .width    integer|nil      window width (default: 60% of the editor, at most 110)
 ---   .conn_id  any|nil          connection to refetch from; with `.path`, enables "r" to refresh
 ---   .path     string[]|nil     leaf path to re-describe on "r" (discarding server-side cache)
 function M.open_single(opts)
@@ -759,7 +760,7 @@ function M.open_single(opts)
 
   local ew     = vim.o.columns
   local eh     = vim.o.lines
-  local width  = math.min(math.floor(ew * 0.60), 110)
+  local width  = opts.width or math.min(math.floor(ew * 0.60), 110)
   local max_h  = math.max(math.floor(eh * 0.72), 8)
   local height = math.min(math.max(opts.estimate(opts.item), 8), max_h)
   local col0   = math.max(0, math.floor((ew - width  - 2) / 2))

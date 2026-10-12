@@ -28,6 +28,7 @@ local hover          = require("grannos.ui.hover")
 local column_ui      = require("grannos.ui.column")
 local messages       = require("grannos.messages")
 local histogram      = require("grannos.ui.histogram")
+local row_detail     = require("grannos.ui.row_detail")
 
 local M = {}
 
@@ -795,6 +796,50 @@ local function show_column_hover(buf_state)
   end)
 end
 
+--- Return the result row under the cursor, in whichever view (single-page or
+--- batch) is showing: its column names and cells in display order, plus a title
+--- naming its position. Nil when the cursor is not on a data row — the label,
+--- a message line, the table header or its separator.
+--- @param buf_state table
+--- @return { columns: string[], row: any[], title: string }|nil
+local function row_at_cursor(buf_state)
+  local line0 = vim.api.nvim_win_get_cursor(0)[1] - 1
+  -- tbl.text[1] is the header and [2] its separator, so the k-th data row is
+  -- text[k + 2], at offset k + 1 from the table's first line.
+  if buf_state.table_data then
+    local k = line0 - (buf_state.table_start or 2) - 1
+    if k < 1 or k > #buf_state.table_data.text - 2 then return nil end
+    local n   = (buf_state.page - 1) * config.options.results.page_size + k
+    local raw = buf_state.raw_rows[n]
+    if not raw then return nil end
+    local row = {}
+    for i, idx in ipairs(visible_col_indices(buf_state)) do row[i] = raw[idx] end
+    return { columns = buf_state.vis_columns, row = row,
+             title = ("Row %d of %d"):format(n, buf_state.rows_returned or #buf_state.raw_rows) }
+  end
+  local offset = 0
+  for _, seg in ipairs(buf_state.segments) do
+    local seg_len = #seg.header + #seg.lines + 1
+    if line0 < offset + seg_len then
+      if not seg.tbl then return nil end
+      local tbl_start = offset + #seg.header + #seg.lines - #seg.tbl.text
+      local k = line0 - tbl_start - 1
+      if k < 1 or k > #seg.tbl.text - 2 or not seg.rows[k] then return nil end
+      return { columns = seg.columns, row = seg.rows[k],
+               title = ("Statement %d/%d · row %d of %d"):format(seg.idx, seg.total, k, seg.rows_returned) }
+    end
+    offset = offset + seg_len
+  end
+end
+
+--- Open the row under the cursor in a float as a vertical `column │ value`
+--- table, with its values' newlines and tabs honoured.
+--- @param buf_state table
+local function show_row_detail(buf_state)
+  local r = row_at_cursor(buf_state)
+  if r then row_detail.open(r.columns, r.row, r.title) end
+end
+
 --- Return an existing valid buf_state for `buf_key` (see `buf_key_for`), or create
 --- and register a new one.
 --- @param buf_key   string
@@ -895,6 +940,8 @@ local function get_or_create_buf_state(buf_key, buf_title)
     { desc = "Open LOB cell in buffer", silent = true })
   buf:set_keymap("n", "S", function() on_save_lob_to_disk(buf_state) end,
     { desc = "Save LOB cell to disk", silent = true })
+  buf:set_keymap("n", "<CR>", function() show_row_detail(buf_state) end,
+    { desc = "Show the row under the cursor as a vertical table", silent = true })
   return buf_state
 end
 
