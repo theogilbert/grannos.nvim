@@ -46,3 +46,34 @@ describe("client exit handler", function()
     assert.are.same({ "backend exited", "exit" }, events)
   end)
 end)
+
+describe("client.capabilities_snapshot", function()
+  -- A stand-in backend answering every request with fixed capabilities.
+  local FAKE = [[sed -u 's/.*"id":\([0-9]*\).*/{"id":\1,"result":{"server":"srv","protocol_version":"1.1","drivers":[{"driver":"pg","default":null}]},"error":null}/']]
+
+  before_each(function()
+    client.caps_file = vim.fn.tempname() .. ".json"
+    client.reset_capabilities()
+  end)
+
+  after_each(function()
+    client.stop()
+    vim.wait(5000, function() return not client.is_running() end, 20)
+    pcall(vim.fn.delete, client.caps_file)
+    client.caps_file = nil
+  end)
+
+  it("is nil before any backend has reported its capabilities", function()
+    assert.is_nil(client.capabilities_snapshot(FAKE))
+  end)
+
+  it("returns what the backend last reported, for the command it was started with only", function()
+    client.start(FAKE)
+    local got
+    client.ensure_capabilities(function(caps) got = caps end)
+    vim.wait(5000, function() return got ~= nil end, 20)
+
+    assert.same({ server = "srv", protocol_version = "1.1", drivers = { { driver = "pg" } } }, client.capabilities_snapshot(FAKE))
+    assert.is_nil(client.capabilities_snapshot("other-cmd"))
+  end)
+end)

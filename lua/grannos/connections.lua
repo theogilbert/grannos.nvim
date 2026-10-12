@@ -675,16 +675,20 @@ end
 --- prompts for its password when required. The list ends with
 --- "[+ New connection]", which opens the new-connection wizard — as does
 --- picking with no saved connections at all. Calls `callback(nil)` on cancel.
---- @param caps       table   server capabilities (from client.ensure_capabilities)
---- @param opts       { active_set: table<string, boolean>, current_key: string|nil, filetype: string }
+--- @param caps       table   server capabilities: the list is built from them, so they may be a
+---                           stale snapshot when `opts.await_caps` supplies the live ones
+--- @param opts       { active_set: table<string, boolean>, current_key: string|nil, filetype: string, await_caps: fun(cb: fun(caps: table))|nil }
 ---   .active_set  { [conn_key] = true } for all currently open connections
 ---   .current_key the connection the caller's buffer is on now, if any
 ---   .filetype    current buffer filetype: connections whose driver speaks it sort first
+---   .await_caps  delivers the capabilities a selection acts on (password prompt, wizard);
+---                defaults to `caps`. Never calling back abandons the selection.
 --- @param callback   fun(key: string|nil, params: table|nil)
 function M.pick(caps, opts, callback)
   local server      = caps.server or ""
   local server_data = M.load(server)
   local active_set  = opts.active_set or {}
+  local await_caps  = opts.await_caps or function(cb) cb(caps) end
 
   -- Driver rank from caps: 1 = one of the driver's languages maps to the
   -- current filetype, 2 = generic driver (no declared languages), 3 = a
@@ -723,7 +727,7 @@ function M.pick(caps, opts, callback)
   end
 
   if #rows == 0 then
-    M.create(caps, callback)
+    await_caps(function(live) M.create(live, callback) end)
     return
   end
 
@@ -740,11 +744,13 @@ function M.pick(caps, opts, callback)
     title     = " Connections ",
     on_cancel = function() callback(nil) end,
     on_select = function(row)
-      if not row.key then M.create(caps, callback) return end
-      if row.open then callback(row.key, nil) return end
-      prompt_password(caps, row.driver, row.params, function(params)
-        if not params then callback(nil) return end
-        callback(row.key, params)
+      await_caps(function(live)
+        if not row.key then M.create(live, callback) return end
+        if row.open then callback(row.key, nil) return end
+        prompt_password(live, row.driver, row.params, function(params)
+          if not params then callback(nil) return end
+          callback(row.key, params)
+        end)
       end)
     end,
   })

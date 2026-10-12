@@ -245,10 +245,27 @@ function M.attach(name)
     end)
   else
     local ft = vim.bo[bufnr].filetype
-    M.ensure_backend_with_caps(function(caps)
+    if not start_backend() then return end
+
+    --- Open the picker listing the saved connections of `caps`' server.
+    --- @param caps table  live capabilities, or the snapshot of a previous backend's
+    local function open_picker(caps)
       local active_set = {}
       for _, k in ipairs(M.active_keys()) do active_set[k] = true end
-      local opts = { active_set = active_set, current_key = state.buf_conns[bufnr], filetype = ft }
+      local opts = {
+        active_set  = active_set,
+        current_key = state.buf_conns[bufnr],
+        filetype    = ft,
+        -- A selection acts on the live capabilities. The list came from a
+        -- snapshot of another server's when the server name changed, so it
+        -- is listed again instead.
+        await_caps  = function(cb)
+          client.ensure_capabilities(function(live)
+            if (live.server or "") ~= (caps.server or "") then open_picker(live) return end
+            cb(live)
+          end)
+        end,
+      }
       connections.pick(caps, opts, function(picked_name, params)
         if not picked_name then return end
         if not params then
@@ -258,7 +275,18 @@ function M.attach(name)
         end
         M._do_connect(picked_name, params, after_connect)
       end)
-    end)
+    end
+
+    -- The backend takes a moment to report its capabilities after it starts;
+    -- the list only needs the last ones it reported, so it opens on those and
+    -- the live ones are awaited only once something is picked.
+    local snapshot = not client.capabilities() and client.capabilities_snapshot(config.options.server_cmd)
+    if snapshot then
+      client.ensure_capabilities(function() end)
+      open_picker(snapshot)
+    else
+      client.ensure_capabilities(open_picker)
+    end
   end
 end
 

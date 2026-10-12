@@ -12,10 +12,15 @@ local state = {
   pending      = {},  -- id → callback(err, result)
   line_parts   = {},  -- chunks of the partial line accumulated across on_stdout calls
   exit_handler = nil, -- fun(code: integer)|nil, called whenever the process exits
+  cmd          = nil, -- the command the running backend was started with
 }
 
 local caps_cache   = nil  -- cached capabilities result
 local caps_pending = {}   -- callbacks waiting for the first fetch
+
+--- Override for the capabilities snapshot path (tests point this at a temp file).
+--- @type string|nil
+M.caps_file = nil
 
 -- Wire-protocol version this client was built against, as "<major>.<minor>".
 -- Bump the major component alongside protocol.md and grannos-py's
@@ -217,6 +222,7 @@ function M.start(cmd)
     error(("failed to start %q — see :checkhealth grannos"):format(cmd), 0)
   end
   state.job_id = job_id
+  state.cmd    = cmd
 end
 
 --- Return a human-readable warning when `server_version`'s major component
@@ -232,12 +238,50 @@ function M.check_protocol_compat(server_version)
     PROTOCOL_VERSION, server_version or "none (pre-versioning server)")
 end
 
+--- Return the path of the on-disk snapshot of the last capabilities fetched.
+--- @return string
+local function caps_file_path()
+  return M.caps_file or (vim.fn.stdpath("cache") .. "/grannos/capabilities.json")
+end
+
+--- Save `caps` as the snapshot for the backend started with `cmd`.
+--- @param cmd  string
+--- @param caps table
+local function save_caps_snapshot(cmd, caps)
+  local path = caps_file_path()
+  vim.fn.mkdir(vim.fn.fnamemodify(path, ":h"), "p")
+  local f = io.open(path, "w")
+  if not f then return end
+  f:write(vim.json.encode({ server_cmd = cmd, caps = caps }))
+  f:close()
+end
+
+--- Return the capabilities the backend reported the last time one started with
+--- `cmd` answered, possibly in an earlier Neovim session, or nil when none was
+--- saved for that command. They may be stale: callers use them only to show
+--- something before the live fetch lands, and act on the live ones.
+--- @param cmd string  shell command the backend is launched with
+--- @return table|nil
+function M.capabilities_snapshot(cmd)
+  local f = io.open(caps_file_path(), "r")
+  if not f then return nil end
+  local content = f:read("*a")
+  f:close()
+  local ok, decoded = pcall(vim.json.decode, content)
+  if not ok or type(decoded) ~= "table" or decoded.server_cmd ~= cmd or type(decoded.caps) ~= "table" then
+    return nil
+  end
+  return strip_nil(decoded.caps)
+end
+
 --- Fetch capabilities once and cache the result; subsequent calls return immediately.
+--- A successful fetch is also saved as the snapshot `capabilities_snapshot` reads.
 --- @param callback fun(caps: table)
 function M.ensure_capabilities(callback)
   if caps_cache then callback(caps_cache) return end
   table.insert(caps_pending, callback)
   if #caps_pending > 1 then return end  -- request already in-flight
+  local cmd = state.cmd
   M.request("capabilities", {}, function(err, result)
     if err then
       caps_cache = { server = "", drivers = {} }
@@ -245,6 +289,7 @@ function M.ensure_capabilities(callback)
       caps_cache = result
       local warning = M.check_protocol_compat(caps_cache.protocol_version)
       if warning then vim.notify(warning, vim.log.levels.ERROR) end
+      if cmd then save_caps_snapshot(cmd, caps_cache) end
     end
     local waiting = caps_pending
     caps_pending = {}
