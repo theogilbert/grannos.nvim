@@ -7,6 +7,7 @@ local results     = require("grannos.ui.results")
 local gutter      = require("grannos.ui.gutter")
 local log         = require("grannos.log")
 local ts_queries  = require("grannos.ts_queries")
+local devtools    = require("grannos.devtools")
 
 -- Past-tense verb shown for DML statements, keyed by leading keyword.
 local DML_VERBS = {
@@ -219,7 +220,8 @@ function M.run(conn, query, bufnr, first_line)
     if bufnr and first_line ~= nil then
       local nlines   = select(2, query:gsub("\n", ""))
       local end_row  = first_line + nlines
-      local stmts    = ts_queries.statements_in_range(bufnr, first_line, end_row)
+      local splitter = devtools.applies(conn) and devtools or ts_queries
+      local stmts    = splitter.statements_in_range(bufnr, first_line, end_row)
       if stmts and #stmts > 1 then
         local first_s = stmts[1]
         local last_s  = stmts[#stmts]

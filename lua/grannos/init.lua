@@ -11,6 +11,7 @@ local connections_panel = require("grannos.ui.connections")
 local selection         = require("grannos.selection")
 local gutter            = require("grannos.ui.gutter")
 local ts_queries        = require("grannos.ts_queries")
+local devtools          = require("grannos.devtools")
 local symbols           = require("grannos.symbols")
 local log               = require("grannos.log")
 local session_params    = require("grannos.session_params")
@@ -66,6 +67,15 @@ local state = {
 local function conn_for_buf(bufnr)
   local name = state.buf_conns[bufnr]
   return name and state.conns[name]
+end
+
+--- Return the module that splits `bufnr` into statements: `devtools` when the
+--- buffer queries an Elasticsearch connection in Dev Tools mode, whose requests
+--- its Lucene grammar cannot parse, else `ts_queries`.
+--- @param bufnr integer
+--- @return table  exposes statements_in_range and statement_at_cursor
+local function statement_splitter(bufnr)
+  return devtools.applies(conn_for_buf(bufnr)) and devtools or ts_queries
 end
 
 --- Return the human-readable label "display_name (Driver Label) (key=value, …)"
@@ -546,7 +556,7 @@ function M.execute()
     local er  = math.max(vsr, ver) - 1
 
     -- Flash when the selection fully covers 2+ distinct statements.
-    local ts_stmts = ts_queries.statements_in_range(bufnr, sr, er)
+    local ts_stmts = statement_splitter(bufnr).statements_in_range(bufnr, sr, er)
     if ts_stmts and #ts_stmts > 1 then
       local first_s = ts_stmts[1]
       local last_s  = ts_stmts[#ts_stmts]
@@ -564,7 +574,7 @@ function M.execute()
     execute_sql(sql, bufnr, sr)
   else
     -- No selection: use treesitter to find the outermost statement at cursor.
-    local ts_stmt = ts_queries.statement_at_cursor(bufnr)
+    local ts_stmt = statement_splitter(bufnr).statement_at_cursor(bufnr)
     if ts_stmt then
       flash_range(bufnr, ts_stmt.start_row, ts_stmt.start_col, ts_stmt.end_row, ts_stmt.end_col)
       execute_sql(ts_stmt.text, bufnr, ts_stmt.start_row)
@@ -1012,7 +1022,7 @@ function M.show_query_info()
   local conn_key = state.buf_conns[bufnr]
   if not conn_key then return end
 
-  local stmt  = ts_queries.statement_at_cursor(bufnr)
+  local stmt  = statement_splitter(bufnr).statement_at_cursor(bufnr)
   local line  = stmt and stmt.start_row or (vim.api.nvim_win_get_cursor(0)[1] - 1)
   local entry = log.find_at(conn_key, bufnr, line)
   if not entry then
