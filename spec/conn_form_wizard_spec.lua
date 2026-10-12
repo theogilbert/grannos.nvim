@@ -215,6 +215,38 @@ describe("connections.edit (form-based)", function()
     submit(stub.last)
     assert.equals("hunter2", got_params.password)
   end)
+
+  it("makes a prompting connection passwordless when the password is confirmed empty", function()
+    -- Flag the connection as prompting: a password typed but not remembered.
+    local key = connections.conn_key("srv", "pg", "", "mydb")
+    connections.edit(key, CAPS, function() end)
+    find(stub.last.fields, "password").commit_text("hunter2")
+    submit(stub.last)
+    assert.is_true(connections.get(key).requires_password)
+
+    local got_params
+    connections.edit(key, CAPS, function(_, params) got_params = params end)
+    find(stub.last.fields, "password").commit_text("")
+    assert.equals("(empty)", find(stub.last.fields, "password").display())
+    submit(stub.last)
+    assert.is_false(got_params.requires_password)
+    assert.is_nil(got_params.password)
+    assert.is_false(connections.get(key).requires_password)
+  end)
+
+  it("drops a remembered password when the password is confirmed empty", function()
+    local key = connections.conn_key("srv", "pg", "", "mydb")
+    connections.edit(key, CAPS, function() end)
+    find(stub.last.fields, "password").commit_text("hunter2")
+    find(stub.last.fields, "remember_password").toggle()
+    submit(stub.last)
+
+    connections.edit(key, CAPS, function() end)
+    find(stub.last.fields, "password").commit_text("")
+    submit(stub.last)
+    assert.is_nil(connections.get(key).password)
+    assert.is_false(connections.get(key).requires_password)
+  end)
 end)
 
 describe("connections.clone (form-based)", function()

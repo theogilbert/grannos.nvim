@@ -519,7 +519,8 @@ end
 --- ("(empty)"); for edit/clone it reflects whether the connection already has
 --- a password or a `requires_password` flag (masked stars). Leaving the field
 --- unedited always means "keep whatever is already there" (or "no password",
---- for create) — mirrors the old prompt_password_and_remember semantics,
+--- for create); confirming it empty means "no password", clearing any stored
+--- password and `requires_password` flag — mirrors the old prompt_password_and_remember semantics,
 --- minus its "confirm empty password" dialog: the form shows the set/not-set
 --- state persistently, so a failed paste is immediately visible. The mask is
 --- a fixed-width placeholder rather than one star per character, since the
@@ -542,9 +543,10 @@ local function make_password_fields(pw_param, had_value, remembered)
     key          = pw_param.key,
     label        = pw_param.label,
     kind         = "secret",
-    get          = function() return { edited = edited and raw ~= "", raw = raw } end,
+    get          = function() return { edited = edited, raw = raw } end,
     display      = function()
-      local has_value = (edited and raw ~= "") or had_value
+      local has_value
+      if edited then has_value = raw ~= "" else has_value = had_value end
       return has_value and PW_MASK or "(empty)"
     end,
     edit_prefill = function() return "" end,
@@ -555,11 +557,12 @@ end
 
 --- Resolve the password-related connection params for an edit/clone submit, from
 --- the stored connection and the form's raw values. An edited, non-empty password
---- field wins over the stored one; leaving it unedited keeps whatever is there.
---- The "Remember password" toggle then decides where that password lives: checked
---- stores it in `connections.json`, unchecked drops it from the file and flags the
---- connection as one to prompt for (the resolved password is still returned, so the
---- current session connects without a second prompt).
+--- field wins over the stored one; leaving it unedited keeps whatever is there,
+--- and confirming it empty makes the connection passwordless. The "Remember
+--- password" toggle then decides where that password lives: checked stores it in
+--- `connections.json`, unchecked drops it from the file and flags the connection
+--- as one to prompt for (the resolved password is still returned, so the current
+--- session connects without a second prompt).
 --- @param pw_key  string|nil  the secret param's key, or nil for drivers without one
 --- @param current table       the connection's existing params
 --- @param values  table       raw values gathered from the form
@@ -569,7 +572,10 @@ local function resolve_password_params(pw_key, current, values)
   local stored = pw_key and current[pw_key]
   if stored == vim.NIL or stored == "" then stored = nil end
   local pw_result = (pw_key and values[pw_key]) or { edited = false, raw = "" }
-  local typed = (pw_result.edited and pw_result.raw ~= "") and pw_result.raw or nil
+  if pw_result.edited and pw_result.raw == "" then
+    return { requires_password = false }, nil
+  end
+  local typed = pw_result.edited and pw_result.raw or nil
   local pw = typed or stored
 
   local out = {}
@@ -590,7 +596,8 @@ end
 --- validated/persisted). Coerces integer fields and resolves the password the
 --- same way a submit would: an edited, non-empty password field wins, and an
 --- unedited one falls back to `current`'s already-stored password (nil for
---- create, where an unedited/empty password just means "no password").
+--- create, where an unedited/empty password just means "no password"), and
+--- one confirmed empty sends none.
 --- @param dfields  table[]     driver param descriptors (excludes the secret one)
 --- @param pw_param table|nil   the secret field descriptor (or nil)
 --- @param values   table       raw values gathered from the form
@@ -606,7 +613,8 @@ local function build_connect_params(dfields, pw_param, values, current)
     local pw_result = values[pw_key] or { edited = false, raw = "" }
     local current_pw = current and current[pw_key]
     if current_pw == vim.NIL then current_pw = nil end
-    local pw = (pw_result.edited and pw_result.raw ~= "") and pw_result.raw or current_pw
+    local pw
+    if pw_result.edited then pw = pw_result.raw else pw = current_pw end
     if pw and pw ~= "" then params[pw_key] = pw end
   end
   return params
