@@ -13,6 +13,8 @@
 :DbStop	grannos.txt	/*:DbStop*
 :checkhealth-grannos	grannos.txt	/*:checkhealth-grannos*
 grannos-api	grannos.txt	/*grannos-api*
+grannos-auto-attach	grannos.txt	/*grannos-auto-attach*
+grannos-auto_attach	grannos.txt	/*grannos-auto_attach*
 grannos-commands	grannos.txt	/*grannos-commands*
 grannos-completion	grannos.txt	/*grannos-completion*
 grannos-completion-cmp	grannos.txt	/*grannos-completion-cmp*
@@ -25,6 +27,7 @@ grannos-connections-api	grannos.txt	/*grannos-connections-api*
 grannos-connections_file	grannos.txt	/*grannos-connections_file*
 grannos-contents	grannos.txt	/*grannos-contents*
 grannos-decimal_separator	grannos.txt	/*grannos-decimal_separator*
+grannos-directive	grannos.txt	/*grannos-directive*
 grannos-drivers	grannos.txt	/*grannos-drivers*
 grannos-explorer	grannos.txt	/*grannos-explorer*
 grannos-goto-symbol-key	grannos.txt	/*grannos-goto-symbol-key*

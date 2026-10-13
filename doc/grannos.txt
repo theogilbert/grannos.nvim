@@ -155,6 +155,27 @@ COMMANDS                                                    *grannos-commands*
 :DbAttach {name}
     Connect directly to the named connection without showing the picker.
 
+AUTO-ATTACH ~                                             *grannos-auto-attach*
+                                                        *grannos-directive*
+A query file can name the connection it should attach to when opened, with
+a directive comment in its first or last 5 lines (like a |modeline|):
+>sql
+  -- grannos: connection=analytics/prod
+<
+>
+  // grannos: connection=prod
+  /* grannos: connection=prod */
+<
+Any comment leader works, since it is not checked; a trailing `*/` or `-->`
+is not part of the name. The value is the connection's "group/name", or
+just "name" when it is ungrouped or no other saved connection shares it.
+
+Opening the file starts the backend if needed, connects (prompting for the
+password if needed) and associates the buffer, as |:DbAttach| would; a
+connection already open is reused. A buffer already associated is left
+alone, and a name matching no saved connection is reported. Turn it off
+with |grannos-auto_attach|.
+
                                                         *:DbNewConnection*
 :DbNewConnection
     Run the new-connection wizard directly. On completion the connection
@@ -451,6 +472,11 @@ KEYMAPS ~
           stay as the pane received them (MongoDB, Elasticsearch and Neo4j
           send every value as a string, and an array of plain values as
           one `{a, b}` string), and a field one document lacks is `null`.
+  <CR>    Open the row under the cursor in a float, as a vertical
+          "column │ value" table. Each value is the buffer text verbatim —
+          its newlines start new lines, its tabs stay tabs — and wraps
+          under the value column, so `yy` (a one-line value) or `yip` (any
+          value) yanks exactly the value.  `q` or <Esc> closes it.
   o       Open the LOB cell under the cursor in a scratch buffer.
   S       Save the LOB cell under the cursor to a file on disk (prompted).
   [       Go to the previous page of results.
@@ -869,6 +895,7 @@ All keys are optional.
     server_cmd       = "grannos",
     connections_file = nil,   -- auto-detected from $XDG_CONFIG_HOME
     queries_dir      = nil,   -- auto-detected from $XDG_DATA_HOME
+    auto_attach      = true,
     keymaps = {
       hover_key       = "K",
       query_info_key  = "gK",
@@ -941,6 +968,13 @@ queries_dir ~
   Root directory for saved queries. Each query is stored as a plain text
   file in a subdirectory that encodes its scope. The directory is created
   automatically on first save. See |grannos-saved-queries|.
+
+                                                      *grannos-auto_attach*
+auto_attach ~
+  Type: `boolean`   Default: `true`
+
+  Associate a file with the connection its `grannos: connection=…`
+  directive comment names when it is opened. See |grannos-auto-attach|.
 
                                                     *grannos-hover-key*
 keymaps.hover_key ~
