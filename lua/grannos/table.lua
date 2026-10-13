@@ -427,9 +427,13 @@ end
 
 
 --- Set up box-drawing character highlighting for a buffer that shows a table.
---- Call once after creating the buffer.
+--- Call once after creating the buffer. 'synmaxcol' is lifted: syntax stops
+--- matching past it (3000 bytes by default), and every box-drawing glyph is 3
+--- bytes, so a wide table's borders would otherwise lose their colour from
+--- about its 1000th character on.
 --- @param buf_id integer
 function M.setup_buf_hl(buf_id)
+  vim.bo[buf_id].synmaxcol = 0
   vim.api.nvim_buf_call(buf_id, function()
     vim.cmd("syntax match GrannosTableBorder /[│├┼─┤]/")
   end)
