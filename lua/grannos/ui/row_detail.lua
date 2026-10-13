@@ -9,8 +9,12 @@
 -- 'wrap' folds a long value under the value column and refolds it when the
 -- window is resized, and `yy` (a one-line value) or `yip` (any value) yanks
 -- exactly the value, with no name, border or injected break in it.
-local pane = require("grannos.ui.detail_pane")
-local hl   = require("grannos.hl")
+--
+-- It shows every column of the row by default; `a` toggles to the columns the
+-- results pane displays (its column selection) and back.
+local pane   = require("grannos.ui.detail_pane")
+local hl     = require("grannos.hl")
+local Buffer = require("grannos.buffer")
 
 local M = {}
 
@@ -150,24 +154,48 @@ local function geometry(lay, win)
   }
 end
 
---- Open a float showing one result row as a vertical table.
---- @param columns string[]  column names, in display order
---- @param row     any[]     cell values, parallel to `columns`
---- @param title   string    window title
-function M.open(columns, row, title)
+--- Open a float showing one result row as a vertical table, every column of
+--- it at first. With `selected`, `a` toggles between those columns (the
+--- results pane's selection) and every column.
+--- @param columns  string[]        every column name, in result order
+--- @param row      any[]           cell values, parallel to `columns`
+--- @param title    string          window title
+--- @param selected integer[]|nil   indices into `columns` the results pane shows, in its order
+function M.open(columns, row, title, selected)
   local restore_origin = pane.capture_origin()
-  local lay = M.layout(columns, row)
+  local show_all = true
 
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].bufhidden = "wipe"
   vim.bo[buf].tabstop   = TABSTOP
-  pane.apply(buf, lay.lines, lay.hls)
-  for _, r in ipairs(lay.rules) do
-    vim.api.nvim_buf_set_extmark(buf, NS, r, 0, {
-      virt_text = { { string.rep("─", 1000), "GrannosBorder" } }, virt_text_pos = "overlay",
-    })
+
+  --- The layout of the columns currently shown, and the title naming them.
+  --- @return table lay, string win_title
+  local function current()
+    if show_all or not selected then
+      local suffix = selected and (" · all %d columns"):format(#columns) or ""
+      return M.layout(columns, row), " " .. title .. suffix .. " "
+    end
+    local cols, vals = {}, {}
+    for i, idx in ipairs(selected) do cols[i], vals[i] = columns[idx], row[idx] end
+    return M.layout(cols, vals), (" %s · %d/%d selected columns "):format(title, #selected, #columns)
   end
-  state[buf] = { cells = lay.cells, wrap_cell = lay.wrap_cell }
+
+  --- Write `lay` into the buffer and the statuscolumn state.
+  --- @param lay table  from M.layout
+  local function fill(lay)
+    pane.apply(buf, lay.lines, lay.hls)
+    vim.api.nvim_buf_clear_namespace(buf, NS, 0, -1)
+    for _, r in ipairs(lay.rules) do
+      vim.api.nvim_buf_set_extmark(buf, NS, r, 0, {
+        virt_text = { { string.rep("─", 1000), "GrannosBorder" } }, virt_text_pos = "overlay",
+      })
+    end
+    state[buf] = { cells = lay.cells, wrap_cell = lay.wrap_cell }
+  end
+
+  local lay, win_title = current()
+  fill(lay)
 
   local g   = geometry(lay)
   local win = vim.api.nvim_open_win(buf, true, {
@@ -175,7 +203,7 @@ function M.open(columns, row, title)
     row       = g.row, col = g.col,
     width     = g.width, height = g.height,
     style     = "minimal", border = "rounded",
-    title     = " " .. title .. " ",
+    title     = win_title,
     title_pos = "center",
   })
   vim.api.nvim_win_set_hl_ns(win, hl.NS_ID)
@@ -200,6 +228,29 @@ function M.open(columns, row, title)
     restore_origin()
   end
 
+  --- Switch between every column and the results pane's selection.
+  local function toggle_columns()
+    show_all = not show_all
+    lay, win_title = current()
+    fill(lay)
+    vim.api.nvim_win_set_config(win, { title = win_title, title_pos = "center" })
+    pcall(vim.api.nvim_win_set_cursor, win, { 1, 0 })
+  end
+
+  local keymaps = {}
+  --- Map `lhs` in the float and list it in the `g?` help.
+  --- @param lhs  string
+  --- @param fn   fun()
+  --- @param desc string
+  local function map(lhs, fn, desc)
+    vim.keymap.set("n", lhs, fn, { buffer = buf, nowait = true, silent = true, desc = desc })
+    keymaps[#keymaps + 1] = { lhs = lhs, desc = desc, group = "" }
+  end
+  if selected then map("a", toggle_columns, "Toggle all columns / the results pane's selected columns") end
+  map("q",     close, "Close")
+  map("<Esc>", close, "Close")
+  map("g?",    function() Buffer.render_help_float(keymaps) end, "Show this help")
+
   local aug = vim.api.nvim_create_augroup("GrannosRowDetail_" .. buf, { clear = true })
   vim.api.nvim_create_autocmd("VimResized", {
     group = aug,
@@ -214,8 +265,6 @@ function M.open(columns, row, title)
       vim.api.nvim_del_augroup_by_id(aug)
     end,
   })
-  vim.keymap.set("n", "q",     close, { buffer = buf, nowait = true, silent = true })
-  vim.keymap.set("n", "<Esc>", close, { buffer = buf, nowait = true, silent = true })
 end
 
 return M

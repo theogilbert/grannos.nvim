@@ -797,11 +797,12 @@ local function show_column_hover(buf_state)
 end
 
 --- Return the result row under the cursor, in whichever view (single-page or
---- batch) is showing: its column names and cells in display order, plus a title
---- naming its position. Nil when the cursor is not on a data row — the label,
---- a message line, the table header or its separator.
+--- batch) is showing: every column name and cell of it, the indices of the
+--- columns the pane displays (single results only — a batch view keeps every
+--- column), plus a title naming its position. Nil when the cursor is not on a
+--- data row — the label, a message line, the table header or its separator.
 --- @param buf_state table
---- @return { columns: string[], row: any[], title: string }|nil
+--- @return { columns: string[], row: any[], selected: integer[]|nil, title: string }|nil
 local function row_at_cursor(buf_state)
   local line0 = vim.api.nvim_win_get_cursor(0)[1] - 1
   -- tbl.text[1] is the header and [2] its separator, so the k-th data row is
@@ -812,9 +813,7 @@ local function row_at_cursor(buf_state)
     local n   = (buf_state.page - 1) * config.options.results.page_size + k
     local raw = buf_state.raw_rows[n]
     if not raw then return nil end
-    local row = {}
-    for i, idx in ipairs(visible_col_indices(buf_state)) do row[i] = raw[idx] end
-    return { columns = buf_state.vis_columns, row = row,
+    return { columns = buf_state.raw_columns, row = raw, selected = visible_col_indices(buf_state),
              title = ("Row %d of %d"):format(n, buf_state.rows_returned or #buf_state.raw_rows) }
   end
   local offset = 0
@@ -837,7 +836,7 @@ end
 --- @param buf_state table
 local function show_row_detail(buf_state)
   local r = row_at_cursor(buf_state)
-  if r then row_detail.open(r.columns, r.row, r.title) end
+  if r then row_detail.open(r.columns, r.row, r.title, r.selected) end
 end
 
 --- Return an existing valid buf_state for `buf_key` (see `buf_key_for`), or create

@@ -476,7 +476,10 @@ KEYMAPS ~
           "column │ value" table. Each value is the buffer text verbatim —
           its newlines start new lines, its tabs stay tabs — and wraps
           under the value column, so `yy` (a one-line value) or `yip` (any
-          value) yanks exactly the value.  `q` or <Esc> closes it.
+          value) yanks exactly the value.  It lists every column of the
+          row; `a` toggles to just the columns the pane displays (its
+          column selection, see `c` and `x`) and back.  `g?` lists its
+          keys, `q` or <Esc> closes it.
   o       Open the LOB cell under the cursor in a scratch buffer.
   S       Save the LOB cell under the cursor to a file on disk (prompted).
   [       Go to the previous page of results.

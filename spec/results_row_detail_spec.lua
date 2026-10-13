@@ -86,6 +86,35 @@ describe("results <CR> opens the row under the cursor", function()
     assert.same({ "2", "", "line1", "line2" }, lines)
   end)
 
+  it("shows every column at first, and `a` toggles to the pane's selected ones", function()
+    require("grannos.col_selection").file = vim.fn.tempname() .. ".json"
+    require("grannos.col_selection").clear_cache()
+    results.show_results({ "other" }, { { 0 } }, 1, 1, 1.0)
+    results.show_results({ "id", "note", "extra" }, { { 7, "n", "e" } }, 1, 1, 1.0)
+    -- Hide `extra` with the pane's `x`, cursor on its header.
+    local win = results_win()
+    vim.api.nvim_set_current_win(win)
+    local buf = vim.api.nvim_win_get_buf(win)
+    for i, l in ipairs(vim.api.nvim_buf_get_lines(buf, 0, -1, false)) do
+      local at = l:find("extra", 1, true)
+      if at then
+        vim.api.nvim_win_set_cursor(win, { i, at - 1 })
+        break
+      end
+    end
+    vim.api.nvim_feedkeys("x", "x", false)
+
+    press_enter_on("│ 7")
+    local w = float_win()
+    local fbuf = vim.api.nvim_win_get_buf(w)
+    assert.same({ "7", "", "n", "", "e" }, vim.api.nvim_buf_get_lines(fbuf, 0, -1, false))
+    vim.api.nvim_feedkeys("a", "x", false)
+    assert.same({ "7", "", "n" }, vim.api.nvim_buf_get_lines(fbuf, 0, -1, false))
+    assert.truthy(vim.api.nvim_win_get_config(w).title[1][1]:find("2/3 selected", 1, true))
+    vim.api.nvim_feedkeys("a", "x", false)
+    assert.same({ "7", "", "n", "", "e" }, vim.api.nvim_buf_get_lines(fbuf, 0, -1, false))
+  end)
+
   it("does nothing on the header", function()
     results.show_results({ "id", "note" }, { { 1, "first" } }, 1, 1, 1.0)
     press_enter_on("note")
