@@ -27,8 +27,8 @@ local CONTENT_TYPE_FT = {
 --- corrupt genuinely binary content on round-trip. Suggests the query
 --- language's `cp`, which downloads straight to disk instead.
 --- @param content_base64 string  base64-encoded content, as returned by explore.download
---- @param filename       string  suggested filename, used only for filetype detection
---- @param content_type   string  MIME type, used as a filetype fallback
+--- @param filename       string|nil  suggested filename, used only for filetype detection; absent for LOB cells
+--- @param content_type   string|nil  MIME type, used as a filetype fallback
 function M.open(content_base64, filename, content_type)
   local ok, content = pcall(vim.base64.decode, content_base64)
   if not ok then
@@ -46,7 +46,9 @@ function M.open(content_base64, filename, content_type)
   local lines = vim.split(content, "\n", { plain = true })
   local buf   = vim.api.nvim_create_buf(true, false)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  local ft = vim.filetype.match({ filename = filename }) or CONTENT_TYPE_FT[content_type]
+  -- A LOB cell has no name to key off, so the backend may omit `filename`.
+  local ft = type(filename) == "string" and filename ~= "" and vim.filetype.match({ filename = filename })
+  ft = ft or (type(content_type) == "string" and CONTENT_TYPE_FT[content_type]) or nil
   if ft then vim.bo[buf].filetype = ft end
   vim.cmd("tab sbuffer " .. buf)
 end
