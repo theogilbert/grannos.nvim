@@ -71,26 +71,37 @@ local function node_icon(node)
   return TYPE_ICONS[node.type] or FIELD_ICON
 end
 
-local state = {
-  buffer           = nil,
-  tree             = {},
-  conn_id          = nil,
-  conn_label       = nil,  -- "name (driver)" shown in the buffer name
-  conn_key         = nil,  -- storage key for results panel header
-  conn_driver_label = nil,
-  root_loading     = false,
-}
+--- One explorer sidebar. Each is bound to the window it was opened from (its
+--- host) and sits directly to the left of it, so every window can browse its
+--- own connection independently.
+--- @class ExplorerState
+--- @field id                integer          distinguishes this explorer's buffer name
+--- @field buffer            table|nil        Buffer instance, nil until first open
+--- @field host_win          integer          window the sidebar was opened from
+--- @field tree              ExplorerNode[]
+--- @field conn_id           any
+--- @field conn_label        string|nil       "name (driver)" shown in the buffer name
+--- @field conn_key          string|nil       storage key for results panel header
+--- @field conn_driver_label string|nil
+--- @field root_loading      boolean
+--- @field root_waiters      fun(err: string|nil)[]  callbacks waiting for the in-flight root load; see with_root
+--- @field spinner           table
 
+--- Every live explorer, one per host window.
+--- @type ExplorerState[]
+local instances = {}
+
+--- Monotonic counter making each explorer's buffer name unique.
+local next_id = 0
 
 local render  -- forward declaration so the spinner callback can reference it
 
-local spinner = Spinner.new(function() render() end)
-
---- Redraw the explorer buffer from state.tree.
-render = function()
-  local buf = state.buffer.buf_id
-  if state.root_loading then
-    state.buffer:set_content({ "  " .. spinner:glyph() .. " Loading…" })
+--- Redraw the explorer buffer from st.tree.
+--- @param st ExplorerState
+render = function(st)
+  local buf = st.buffer.buf_id
+  if st.root_loading then
+    st.buffer:set_content({ "  " .. st.spinner:glyph() .. " Loading…" })
     vim.api.nvim_buf_clear_namespace(buf, EXPLORER_NS, 0, -1)
     return
   end
@@ -122,7 +133,7 @@ render = function()
       end
 
       local row = #lines  -- 0-based
-      local desc_s = node.describing and (" " .. spinner:glyph()) or ""
+      local desc_s = node.describing and (" " .. st.spinner:glyph()) or ""
       lines[#lines + 1] = indent_s .. chevron_s .. icon_s .. node.name .. label .. desc_s
 
       -- Byte column boundaries (Lua # gives byte length).
@@ -144,15 +155,15 @@ render = function()
       end
 
       if node.loading then
-        lines[#lines + 1] = string.rep("  ", indent + 1) .. "  " .. spinner:glyph() .. " Loading…"
+        lines[#lines + 1] = string.rep("  ", indent + 1) .. "  " .. st.spinner:glyph() .. " Loading…"
       elseif node.expanded and node.children then
         walk(node.children, indent + 1)
       end
     end
   end
 
-  walk(state.tree, 0)
-  state.buffer:set_content(lines)
+  walk(st.tree, 0)
+  st.buffer:set_content(lines)
   vim.api.nvim_buf_clear_namespace(buf, EXPLORER_NS, 0, -1)
   for _, h in ipairs(hls) do
     vim.api.nvim_buf_add_highlight(buf, EXPLORER_NS, h[4], h[1], h[2], h[3])
@@ -179,11 +190,12 @@ local function make_node(item, path)
   }
 end
 
---- Walk state.tree and return the node at `path`, or nil when not found.
+--- Walk st.tree and return the node at `path`, or nil when not found.
+--- @param st ExplorerState
 --- @param path string[]
 --- @return table|nil
-local function node_at_path(path)
-  local nodes = state.tree
+local function node_at_path(st, path)
+  local nodes = st.tree
   local node
   for _, name in ipairs(path) do
     node = nil
@@ -200,9 +212,10 @@ local function node_at_path(path)
 end
 
 --- Return the node that occupies 1-indexed `line` in the current rendering, or nil.
+--- @param st ExplorerState
 --- @param line integer  1-indexed
 --- @return table|nil
-local function node_at_line(line)
+local function node_at_line(st, line)
   local idx = 0
   local function walk(nodes)
     for _, node in ipairs(nodes) do
@@ -214,28 +227,29 @@ local function node_at_line(line)
       end
     end
   end
-  return walk(state.tree)
+  return walk(st.tree)
 end
 
 --- Send an explore.list request for `node`, populate its children, and re-render.
 --- `reset_cache` = true instructs the server to discard its cache.
+--- @param st ExplorerState
 --- @param node        ExplorerNode
 --- @param reset_cache boolean|nil
 --- @param on_done     fun(err: string|nil)|nil  called after the re-render, so a caller
 ---                    walking a path can descend into the children just loaded
-local function load_children(node, reset_cache, on_done)
+local function load_children(st, node, reset_cache, on_done)
   node.loading = true
-  spinner:start()
-  render()
-  local params = { connection_id = state.conn_id, path = node.path }
+  st.spinner:start()
+  render(st)
+  local params = { connection_id = st.conn_id, path = node.path }
   if reset_cache then params.reset_cache = true end
   client.request("explore.list", params, function(err, result)
     node.loading = false
-    spinner:stop()
+    st.spinner:stop()
     if err then
       vim.schedule(function()
         vim.notify("grannos explorer: " .. err, vim.log.levels.ERROR)
-        render()
+        render(st)
         if on_done then on_done(err) end
       end)
       return
@@ -247,22 +261,23 @@ local function load_children(node, reset_cache, on_done)
     end
     node.expanded = true
     vim.schedule(function()
-      render()
+      render(st)
       if on_done then on_done(nil) end
     end)
   end)
 end
 
 --- Handle <CR>: toggle expansion of the node under the cursor.
-local function on_enter()
+--- @param st ExplorerState
+local function on_enter(st)
   local line = vim.api.nvim_win_get_cursor(0)[1]
-  local node = node_at_line(line)
+  local node = node_at_line(st, line)
   if not node or not node.expandable then return end
   if node.expanded then
     node.expanded = false
-    render()
+    render(st)
   else
-    load_children(node)
+    load_children(st, node)
   end
 end
 
@@ -680,34 +695,35 @@ end
 --- Other drivers (e.g. Neo4j's "properties" group) resolve the group path
 --- directly, returning a bare array of FieldDescription; that case is handled
 --- below by discriminating the array's element `type` tag, not by path name.
-local function on_describe()
+--- @param st ExplorerState
+local function on_describe(st)
   local line = vim.api.nvim_win_get_cursor(0)[1]
-  local node = node_at_line(line)
+  local node = node_at_line(st, line)
   if not node then return end
   node.describing = true
-  spinner:start()
-  render()
+  st.spinner:start()
+  render(st)
 
   local is_columns_group = node.type == "group" and node.path[#node.path] == "columns"
   local describe_path = is_columns_group
     and vim.list_slice(node.path, 1, #node.path - 1)
     or node.path
 
-  client.request("explore.describe", { connection_id = state.conn_id, path = describe_path }, function(err, result)
+  client.request("explore.describe", { connection_id = st.conn_id, path = describe_path }, function(err, result)
     node.describing = false
-    spinner:stop()
+    st.spinner:stop()
     if err then
       vim.schedule(function()
         vim.notify("grannos: " .. err, vim.log.levels.ERROR)
-        render()
+        render(st)
       end)
       return
     end
     vim.schedule(function()
-      render()
+      render(st)
       local details = result.details
       if is_columns_group then
-        require("grannos.ui.column").open_group(details, node.path, state.conn_id)
+        require("grannos.ui.column").open_group(details, node.path, st.conn_id)
       elseif is_array(details) then
         local p = node.path
         local parts = vim.list_slice(p, 1, #p - 1)
@@ -719,66 +735,63 @@ local function on_describe()
         -- parent-entity redirect above).
         if details[1] and details[1].type == "field" then
           local title = ctx ~= "" and (" Columns · " .. ctx .. " ") or " Columns "
-          require("grannos.ui.column").open({ properties = details }, title, state.conn_id, node.path)
+          require("grannos.ui.column").open({ properties = details }, title, st.conn_id, node.path)
         elseif details[1] and details[1].type == "generic_record" then
           local title = ctx ~= "" and (" " .. ctx .. " ") or " Records "
-          require("grannos.ui.generic_record").open(details, title, state.conn_id, node.path)
+          require("grannos.ui.generic_record").open(details, title, st.conn_id, node.path)
         else
           local title = ctx ~= "" and (" Indices · " .. ctx .. " ") or " Indices "
-          require("grannos.ui.indices").open(details, title, state.conn_id, node.path)
+          require("grannos.ui.indices").open(details, title, st.conn_id, node.path)
         end
       elseif details and details.type == "index" then
-        require("grannos.ui.indices").open_single(details, state.conn_id, describe_path)
+        require("grannos.ui.indices").open_single(details, st.conn_id, describe_path)
       elseif details and details.type == "field" then
-        require("grannos.ui.column").open_single(details, state.conn_id, describe_path)
+        require("grannos.ui.column").open_single(details, st.conn_id, describe_path)
       elseif details and details.type == "document" then
-        require("grannos.ui.document").open_single(details, node.name, state.conn_id, describe_path)
+        require("grannos.ui.document").open_single(details, node.name, st.conn_id, describe_path)
       elseif details and details.type == "generic_record" then
-        require("grannos.ui.generic_record").open_single(details, state.conn_id, describe_path)
+        require("grannos.ui.generic_record").open_single(details, st.conn_id, describe_path)
       else
-        open_describe_float(details, node, state.conn_id, describe_path)
+        open_describe_float(details, node, st.conn_id, describe_path)
       end
     end)
   end)
 end
 
---- Callbacks waiting for the in-flight root load to finish; see with_root.
---- @type fun(err: string|nil)[]
-local root_waiters = {}
-
---- Fetch the root node list from the server and repopulate state.tree.
+--- Fetch the root node list from the server and repopulate st.tree.
+--- @param st ExplorerState
 --- @param reset_cache boolean|nil  pass true to discard the server-side cache
-local function load_root(reset_cache)
+local function load_root(st, reset_cache)
   --- Hand `err` to everything waiting on this load and clear the queue.
   --- @param err string|nil
   local function settle(err)
-    local waiters = root_waiters
-    root_waiters  = {}
+    local waiters = st.root_waiters
+    st.root_waiters  = {}
     for _, cb in ipairs(waiters) do cb(err) end
   end
 
-  local params = { connection_id = state.conn_id, path = {} }
+  local params = { connection_id = st.conn_id, path = {} }
   if reset_cache then params.reset_cache = true end
-  state.root_loading = true
-  spinner:start()
-  render()
+  st.root_loading = true
+  st.spinner:start()
+  render(st)
   client.request("explore.list", params, function(err, result)
-    state.root_loading = false
-    spinner:stop()
+    st.root_loading = false
+    st.spinner:stop()
     if err then
       vim.schedule(function()
         vim.notify("grannos explorer: " .. err, vim.log.levels.ERROR)
-        render()
+        render(st)
         settle(err)
       end)
       return
     end
-    state.tree = {}
+    st.tree = {}
     for _, item in ipairs(result.items or {}) do
-      state.tree[#state.tree + 1] = make_node(item, { item.name })
+      st.tree[#st.tree + 1] = make_node(item, { item.name })
     end
     vim.schedule(function()
-      render()
+      render(st)
       settle(nil)
     end)
   end)
@@ -787,21 +800,23 @@ end
 --- Run `cb` once the root node list is populated: immediately when the tree is
 --- already there, otherwise after the load finishes — joining an in-flight one
 --- rather than starting a second.
+--- @param st ExplorerState
 --- @param cb fun(err: string|nil)
-local function with_root(cb)
-  if #state.tree > 0 then
+local function with_root(st, cb)
+  if #st.tree > 0 then
     cb(nil)
     return
   end
-  root_waiters[#root_waiters + 1] = cb
-  if not state.root_loading then load_root() end
+  st.root_waiters[#st.root_waiters + 1] = cb
+  if not st.root_loading then load_root(st) end
 end
 
 --- Return the 1-indexed line `node` occupies in the current rendering, or nil
 --- when an ancestor is collapsed and it isn't on screen.
+--- @param st ExplorerState
 --- @param node ExplorerNode
 --- @return integer|nil
-local function line_of_node(node)
+local function line_of_node(st, node)
   local idx = 0
   local function walk(nodes)
     for _, n in ipairs(nodes) do
@@ -813,7 +828,7 @@ local function line_of_node(node)
       end
     end
   end
-  return walk(state.tree)
+  return walk(st.tree)
 end
 
 local PREVIEWABLE_TYPES  = { table = true, ["base table"] = true, view = true, collection = true, metric = true, gridfs_bucket = true }
@@ -821,22 +836,24 @@ local DIAGRAM_TYPES      = { table = true, ["base table"] = true, view = true }
 local DOWNLOADABLE_TYPES = { object = true }
 
 --- Handle the "D" keymap: request an ASCII diagram for the table under the cursor.
-local function on_diagram()
+--- @param st ExplorerState
+local function on_diagram(st)
   local line = vim.api.nvim_win_get_cursor(0)[1]
-  local node = node_at_line(line)
+  local node = node_at_line(st, line)
   if not node or not DIAGRAM_TYPES[node.type] then return end
-  require("grannos.ui.diagram").open(state.conn_id, node.path, node.name, state.conn_key)
+  require("grannos.ui.diagram").open(st.conn_id, node.path, node.name, st.conn_key)
 end
 
 --- Handle the "p" keymap: request a row preview for the node under the cursor.
-local function on_preview_rows()
+--- @param st ExplorerState
+local function on_preview_rows(st)
   local line = vim.api.nvim_win_get_cursor(0)[1]
-  local node = node_at_line(line)
+  local node = node_at_line(st, line)
   if not node or not PREVIEWABLE_TYPES[node.type] then return end
-  results.set_conn_name(state.conn_key, state.conn_driver_label)
+  results.set_conn_name(st.conn_key, st.conn_driver_label)
   results.set_source_table(node.path)
   results.show_message("Loading…")
-  client.request("explore.preview", { connection_id = state.conn_id, path = node.path },
+  client.request("explore.preview", { connection_id = st.conn_id, path = node.path },
     function(err, result)
       vim.schedule(function()
         if err then
@@ -856,12 +873,13 @@ end
 --- Handle the "o" keymap: open the full content of the node under the
 --- cursor in a scratch buffer (e.g. an S3 object). No-op for node types
 --- that don't support content download.
-local function on_open_in_buffer()
+--- @param st ExplorerState
+local function on_open_in_buffer(st)
   local line = vim.api.nvim_win_get_cursor(0)[1]
-  local node = node_at_line(line)
+  local node = node_at_line(st, line)
   if not node or not DOWNLOADABLE_TYPES[node.type] then return end
   vim.notify(("grannos: downloading %q…"):format(node.name), vim.log.levels.INFO)
-  client.request("explore.download", { connection_id = state.conn_id, path = node.path },
+  client.request("explore.download", { connection_id = st.conn_id, path = node.path },
     function(err, result)
       vim.schedule(function()
         if err then
@@ -877,9 +895,10 @@ end
 --- straight to a local file (prompted), without routing it through a buffer —
 --- the right choice for binary content, and for anything too large to
 --- comfortably hold in a Neovim buffer.
-local function on_save_to_disk()
+--- @param st ExplorerState
+local function on_save_to_disk(st)
   local line = vim.api.nvim_win_get_cursor(0)[1]
-  local node = node_at_line(line)
+  local node = node_at_line(st, line)
   if not node or not DOWNLOADABLE_TYPES[node.type] then return end
   vim.ui.input({ prompt = "Save to: ", default = vim.fn.getcwd() .. "/" .. node.name, completion = "file" },
     function(path)
@@ -887,7 +906,7 @@ local function on_save_to_disk()
       local abs_path = vim.fn.fnamemodify(path, ":p")
       vim.notify(("grannos: saving %q…"):format(abs_path), vim.log.levels.INFO)
       client.request("explore.download",
-        { connection_id = state.conn_id, path = node.path, dest_path = abs_path },
+        { connection_id = st.conn_id, path = node.path, dest_path = abs_path },
         function(err, result)
           vim.schedule(function()
             if err then
@@ -901,107 +920,211 @@ local function on_save_to_disk()
 end
 
 --- Create the explorer Buffer (with keymaps) if it doesn't exist or has been wiped.
-local function get_or_create_buffer()
-  if state.buffer and state.buffer:is_valid() then return end
-  state.buffer = Buffer:new(BUFNAME, "grannos_explorer", false, "nofile")
-  state.buffer:set_keymap("n", "<CR>", on_enter,
+--- @param st ExplorerState
+local function get_or_create_buffer(st)
+  if st.buffer and st.buffer:is_valid() then return end
+  st.buffer = Buffer:new(BUFNAME .. "/" .. st.id, "grannos_explorer", false, "nofile")
+  st.buffer:set_keymap("n", "<CR>", function() on_enter(st) end,
     { nowait = true, silent = true, desc = "Expand / collapse node" })
-  state.buffer:set_keymap("n", config.options.keymaps.hover_key, on_describe,
+  st.buffer:set_keymap("n", config.options.keymaps.hover_key, function() on_describe(st) end,
     { nowait = true, silent = true, desc = "Describe item" })
-  state.buffer:set_keymap("n", "r", function()
+  st.buffer:set_keymap("n", "r", function()
     local line = vim.api.nvim_win_get_cursor(0)[1]
-    local node = node_at_line(line)
+    local node = node_at_line(st, line)
     if node and not node.expandable then
       local parent_path = vim.list_slice(node.path, 1, #node.path - 1)
-      node = #parent_path > 0 and node_at_path(parent_path) or nil
+      node = #parent_path > 0 and node_at_path(st, parent_path) or nil
     end
     if node then
       node.children = nil
-      load_children(node, true)
+      load_children(st, node, true)
     else
-      state.tree = {}
-      load_root(true)
+      st.tree = {}
+      load_root(st, true)
     end
   end, { nowait = true, silent = true, desc = "Refresh node" })
-  state.buffer:set_keymap("n", "R", function()
-    state.tree = {}
-    load_root(true)
+  st.buffer:set_keymap("n", "R", function()
+    st.tree = {}
+    load_root(st, true)
   end, { nowait = true, silent = true, desc = "Refresh explorer" })
-  state.buffer:set_keymap("n", "p", on_preview_rows,
+  st.buffer:set_keymap("n", "p", function() on_preview_rows(st) end,
     { nowait = true, silent = true, desc = "Preview rows" })
-  state.buffer:set_keymap("n", "D", on_diagram,
+  st.buffer:set_keymap("n", "D", function() on_diagram(st) end,
     { nowait = true, silent = true, desc = "Show table diagram" })
-  state.buffer:set_keymap("n", "o", on_open_in_buffer,
+  st.buffer:set_keymap("n", "o", function() on_open_in_buffer(st) end,
     { nowait = true, silent = true, desc = "Open content in buffer" })
-  state.buffer:set_keymap("n", "s", on_save_to_disk,
+  st.buffer:set_keymap("n", "s", function() on_save_to_disk(st) end,
     { nowait = true, silent = true, desc = "Save content to disk" })
-  state.buffer:set_keymap("n", "q", function()
-    local win = vim.fn.bufwinid(state.buffer.buf_id)
+  st.buffer:set_keymap("n", "q", function()
+    local win = vim.fn.bufwinid(st.buffer.buf_id)
     if win ~= -1 then vim.api.nvim_win_close(win, true) end
   end, { nowait = true, silent = true, desc = "Close explorer" })
 end
 
---- Open (or focus) the explorer sidebar for the given connection.
+--- Return the explorer whose buffer `win` shows, or nil.
+--- @param win integer
+--- @return ExplorerState|nil
+local function instance_in_win(win)
+  local buf = vim.api.nvim_win_get_buf(win)
+  for _, st in ipairs(instances) do
+    if st.buffer and st.buffer.buf_id == buf then return st end
+  end
+end
+
+--- Return the explorer bound to host window `win`, or nil.
+--- @param win integer
+--- @return ExplorerState|nil
+local function instance_for_host(win)
+  for _, st in ipairs(instances) do
+    if st.host_win == win then return st end
+  end
+end
+
+--- Whether `win` can host an explorer: a normal window in the current tab
+--- showing something other than a grannos panel.
+--- @param win integer
+--- @return boolean
+local function can_host(win)
+  if not vim.api.nvim_win_is_valid(win)
+      or vim.api.nvim_win_get_tabpage(win) ~= vim.api.nvim_get_current_tabpage()
+      or vim.api.nvim_win_get_config(win).relative ~= "" then
+    return false
+  end
+  local ft = vim.bo[vim.api.nvim_win_get_buf(win)].filetype
+  return not vim.startswith(ft, "grannos_")
+end
+
+--- Pick the window an explorer opened now belongs to: the current window, or
+--- when that is a grannos panel (e.g. the connections sidebar), the window
+--- the user came from — failing that, any window in the tab that can host one.
+--- From inside an explorer, its own host.
+--- @return integer
+local function resolve_host()
+  local cur = vim.api.nvim_get_current_win()
+  local own = instance_in_win(cur)
+  if own and vim.api.nvim_win_is_valid(own.host_win) then return own.host_win end
+  if can_host(cur) then return cur end
+  local prev = vim.fn.win_getid(vim.fn.winnr("#"))
+  if prev ~= 0 and can_host(prev) then return prev end
+  for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    if can_host(win) then return win end
+  end
+  return cur
+end
+
+--- Tear down the explorer at `instances[idx]`: stop its spinner and wipe its
+--- buffer, which closes the sidebar if it is still on screen.
+--- @param idx integer
+local function remove_instance(idx)
+  local st = table.remove(instances, idx)
+  st.spinner:reset()
+  if st.buffer and st.buffer:is_valid() then
+    pcall(vim.api.nvim_buf_delete, st.buffer.buf_id, { force = true })
+  end
+end
+
+-- An explorer lives as long as its host window: closing the host takes the
+-- sidebar beside it along.
+vim.api.nvim_create_autocmd("WinClosed", {
+  group    = vim.api.nvim_create_augroup("GrannosExplorer", { clear = true }),
+  callback = function(ev)
+    local win = tonumber(ev.match)
+    vim.schedule(function()
+      for i = #instances, 1, -1 do
+        if instances[i].host_win == win then remove_instance(i) end
+      end
+    end)
+  end,
+})
+
+--- Return the explorer bound to `host`, creating it when there is none.
+--- @param host integer
+--- @return ExplorerState
+local function get_or_create_instance(host)
+  local st = instance_for_host(host)
+  if st then return st end
+  next_id = next_id + 1
+  st = {
+    id           = next_id,
+    host_win     = host,
+    tree         = {},
+    root_loading = false,
+    root_waiters = {},
+  }
+  st.spinner = Spinner.new(function() render(st) end)
+  instances[#instances + 1] = st
+  return st
+end
+
+--- Open (or focus) the explorer sidebar for the given connection, directly to
+--- the left of the current window. Each window gets its own explorer.
 --- @param conn_id      any
 --- @param conn_name    string
 --- @param driver       string
 --- @param conn_key     string
 --- @param driver_label string
 function M.open(conn_id, conn_name, driver, conn_key, driver_label)
-  get_or_create_buffer()
+  local host = resolve_host()
+  local st   = get_or_create_instance(host)
+  get_or_create_buffer(st)
 
   -- Reset the tree when switching to a different connection.
-  if conn_id ~= state.conn_id then
-    state.tree             = {}
-    state.conn_id          = conn_id
-    state.conn_key         = conn_key
-    state.conn_driver_label = driver_label
-    state.conn_label       = conn_name .. " (" .. driver .. ")"
-    pcall(vim.api.nvim_buf_set_name, state.buffer.buf_id,
-      BUFNAME .. " [" .. state.conn_label .. "]")
+  if conn_id ~= st.conn_id then
+    st.tree             = {}
+    st.conn_id          = conn_id
+    st.conn_key         = conn_key
+    st.conn_driver_label = driver_label
+    st.conn_label       = conn_name .. " (" .. driver .. ")"
+    pcall(vim.api.nvim_buf_set_name, st.buffer.buf_id,
+      BUFNAME .. "/" .. st.id .. " [" .. st.conn_label .. "]")
   end
 
-  local win = vim.fn.bufwinid(state.buffer.buf_id)
+  local win = vim.fn.bufwinid(st.buffer.buf_id)
   if win == -1 then
-    win = window.open_sidebar(state.buffer.buf_id, "left")
+    win = window.open_sidebar(st.buffer.buf_id, "left", host)
   end
   vim.api.nvim_set_current_win(win)
 
-  if state.conn_label then
+  if st.conn_label then
     -- Escape % so statusline format doesn't misinterpret it.
-    local label = state.conn_label:gsub("%%", "%%%%")
+    local label = st.conn_label:gsub("%%", "%%%%")
     vim.api.nvim_set_option_value("winbar",
       "%#GrannosHeaderRow#  " .. label, { win = win })
   end
 
-  if #state.tree == 0 then
-    load_root()
+  if #st.tree == 0 then
+    load_root(st)
   else
-    render()
+    render(st)
   end
 end
 
---- Clear the explorer tree and stop the spinner (called on backend teardown).
+--- Clear every explorer tree and stop the spinners (called on backend teardown).
 function M.reset()
-  state.tree         = {}
-  state.root_loading = false
-  spinner:reset()
+  for _, st in ipairs(instances) do
+    st.tree         = {}
+    st.root_loading = false
+    st.spinner:reset()
+  end
 end
 
 --- Expand every ancestor of `path` and put the cursor on the node it names,
---- focusing the explorer window. Children are loaded one level at a time, so a
+--- focusing the explorer window. Acts on the explorer in the current window,
+--- else the one bound to it. Children are loaded one level at a time, so a
 --- path resolves even when nothing along it has been expanded yet. Notifies
 --- when a segment names no node — the tree the backend resolved the path
 --- against and the one on screen can disagree after a schema change.
 --- @param path string[]  absolute path from the root, as returned by explore.find
 function M.reveal(path)
-  if #path == 0 or not (state.buffer and state.buffer:is_valid()) then return end
+  local cur = vim.api.nvim_get_current_win()
+  local st  = instance_in_win(cur) or instance_for_host(cur)
+  if #path == 0 or not (st and st.buffer and st.buffer:is_valid()) then return end
 
   --- Focus the explorer window with the cursor on `node`.
   --- @param node ExplorerNode
   local function focus(node)
-    local line = line_of_node(node)
-    local win  = vim.fn.bufwinid(state.buffer.buf_id)
+    local line = line_of_node(st, node)
+    local win  = vim.fn.bufwinid(st.buffer.buf_id)
     if not line or win == -1 then return end
     vim.api.nvim_set_current_win(win)
     vim.api.nvim_win_set_cursor(win, { line, 0 })
@@ -1011,7 +1134,7 @@ function M.reveal(path)
   --- Expand the node at `path[1..depth]`, then continue one level deeper.
   --- @param depth integer
   local function descend(depth)
-    local node = node_at_path(vim.list_slice(path, 1, depth))
+    local node = node_at_path(st, vim.list_slice(path, 1, depth))
     if not node then
       vim.notify(('grannos: "%s" is not in the explorer tree'):format(table.concat(path, ".")),
         vim.log.levels.WARN)
@@ -1021,16 +1144,16 @@ function M.reveal(path)
       focus(node)
     elseif node.children then
       node.expanded = true
-      render()
+      render(st)
       descend(depth + 1)
     else
-      load_children(node, false, function(err)
+      load_children(st, node, false, function(err)
         if not err then descend(depth + 1) end
       end)
     end
   end
 
-  with_root(function(err)
+  with_root(st, function(err)
     if not err then descend(1) end
   end)
 end

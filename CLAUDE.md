@@ -33,7 +33,7 @@ grannos.nvim is a Neovim database-client plugin that delegates all database work
 | `lua/grannos/health.lua` | `:checkhealth grannos`: verifies setup, backend install, protocol version, parsers |
 | `lua/grannos/buffer.lua` | Generic buffer class: content, keymaps, `g?` help float |
 | `lua/grannos/ui/connections.lua` | Connections panel (right sidebar) |
-| `lua/grannos/ui/explorer.lua` | Schema explorer (left sidebar) |
+| `lua/grannos/ui/explorer.lua` | Schema explorer: a sidebar split to the left of the window it was opened from, one per window, closed with that window |
 | `lua/grannos/ui/results.lua` | Query results panel (split) |
 | `lua/grannos/ui/spinner.lua` | Refcounted braille spinner driven by a libuv timer |
 | `lua/grannos/ui/gutter.lua` | Gutter extmarks: running/success/error icons |

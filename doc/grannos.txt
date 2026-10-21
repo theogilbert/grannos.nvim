@@ -358,9 +358,15 @@ with |grannos-queries_dir|.
 ================================================================================
 EXPLORER                                                    *grannos-explorer*
 
-|:DbExplore| opens a vertical sidebar showing the database object tree.
+|:DbExplore| opens a vertical sidebar showing the database object tree,
+split off the left of the current window rather than the whole screen.
+Each window gets its own explorer, so two windows side by side can browse
+different connections; running |:DbExplore| again from a window (or from
+its explorer) focuses that window's explorer. Opened from a grannos panel
+such as the connections sidebar, it belongs to the window you came from.
+Closing a window closes its explorer too.
 The window title bar (winbar) displays the connection name and driver.
-The buffer is named `grannos://explorer [name (driver)]`.
+The buffer is named `grannos://explorer/<n> [name (driver)]`.
 
 KEYMAPS ~
 
