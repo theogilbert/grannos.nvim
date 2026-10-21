@@ -2,7 +2,7 @@
 -- All fields are shown at once and can be edited in any order: j/k move focus,
 -- <CR>/<Space> update whatever is under the cursor — the one universal action
 -- for every row: an editable overlay right over the value cell for text/secret
--- fields, a dropdown directly below the row for choice fields, a direct flip
+-- fields (a multi-row one for multiline fields), a dropdown directly below the row for choice fields, a direct flip
 -- for checkbox (toggle) fields, no popup at all — <C-s> submits, q/<Esc>
 -- cancels the whole form. Cancelling an individual field edit only returns
 -- focus to the form — it never discards the rest of the form's state. A "Test
@@ -122,7 +122,7 @@ local function render()
     err_row, err_last = append_message(lines, f.error)
     table.insert(lines, "")
   end
-  table.insert(lines, "  <Enter>/<Space> update   x clear   <C-s> save   q/<Esc> cancel   g? help")
+  table.insert(lines, "  <Enter>/<Space> update   x clear   <C-s> " .. f.submit_label .. "   q/<Esc> cancel   g? help")
 
   -- Last line of defence: a field's display() carries whatever was typed or
   -- pasted into it, and one newline anywhere would fail the whole set_lines
@@ -278,6 +278,73 @@ local function open_text_overlay(field)
   vim.schedule(function() vim.cmd("startinsert!") end)
 end
 
+--- Open a bordered, multi-row editable float over `field`'s value cell
+--- (multiline fields), for free text spanning several lines. <CR> in insert
+--- mode is a newline like anywhere else, so <C-s> commits the text via
+--- `field.commit_text`; <Esc> in insert mode only returns to normal mode
+--- within the float, where <Esc> or q cancels. Leaving the float any other
+--- way cancels too.
+--- @param field table  ConnFormField (kind == "multiline")
+local function open_multiline_overlay(field)
+  local initial = vim.split(field.edit_prefill and field.edit_prefill() or "", "\n", { plain = true })
+  local width   = math.max(20, (f.width or 60) - field._value_col - 4)
+  local height  = math.max(5, math.min(#initial + 1, vim.o.lines - 8))
+
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[buf].bufhidden = "wipe"
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, initial)
+
+  local win = vim.api.nvim_open_win(buf, true, {
+    relative   = "win",
+    win        = f.win,
+    bufpos     = { field._row0, field._value_col },
+    row        = 0,
+    col        = -1,
+    width      = width,
+    height     = height,
+    style      = "minimal",
+    border     = "rounded",
+    title      = " one item per line ",
+    title_pos  = "center",
+    footer     = " <C-s> done · <Esc> cancel ",
+    footer_pos = "center",
+    zindex     = 60,
+  })
+  vim.wo[win].wrap = false
+  vim.wo[win].winhl = "Normal:GrannosConnFormEdit,NormalNC:GrannosConnFormEdit"
+  pcall(vim.api.nvim_win_set_cursor, win, { #initial, #initial[#initial] })
+
+  local closed = false
+
+  --- Close the float, committing its text when `commit` is set.
+  --- @param commit boolean
+  local function finish(commit)
+    if closed then return end
+    closed = true
+    local text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+    vim.cmd("stopinsert")
+    if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end
+    if commit then
+      field.commit_text(text)
+      render()
+    end
+  end
+
+  vim.keymap.set({ "i", "n" }, "<C-s>", function() finish(true) end,  { buffer = buf, nowait = true, silent = true })
+  vim.keymap.set("n", "<Esc>",          function() finish(false) end, { buffer = buf, nowait = true, silent = true })
+  vim.keymap.set("n", "q",              function() finish(false) end, { buffer = buf, nowait = true, silent = true })
+  vim.api.nvim_create_autocmd("WinLeave", { buffer = buf, once = true, callback = function() finish(false) end })
+
+  vim.api.nvim_create_autocmd("WinClosed", {
+    pattern = tostring(win), once = true,
+    callback = function()
+      if vim.api.nvim_buf_is_valid(buf) then vim.api.nvim_buf_delete(buf, { force = true }) end
+    end,
+  })
+
+  vim.schedule(function() vim.cmd("startinsert!") end)
+end
+
 --- Open a dropdown float listing `field`'s options directly below its row.
 --- Selecting a normal option calls `field.commit_choice`; selecting the
 --- reserved "is_new" option (if present) instead opens the same in-place text
@@ -386,6 +453,8 @@ local function activate()
     render()
   elseif field.kind == "choice" then
     open_dropdown(field)
+  elseif field.kind == "multiline" then
+    open_multiline_overlay(field)
   else
     open_text_overlay(field)
   end
@@ -439,9 +508,11 @@ end
 --- @param opts table
 ---   .title     string
 ---   .fields    table[]  ConnFormField list (see module docstring for the shape:
----              key, label, kind ("text"|"secret"|"choice"|"toggle"), get, display, is_valid,
----              edit_prefill/commit_text for text/secret, options/commit_choice for choice,
+---              key, label, kind ("text"|"secret"|"multiline"|"choice"|"toggle"), get, display,
+---              is_valid, edit_prefill/commit_text for text/secret/multiline (a multiline
+---              field's text joins its lines with "\n"), options/commit_choice for choice,
 ---              toggle for toggle, optional clear for any field `x` may empty)
+---   .submit_label string|nil  what <C-s> does, for the footer hint (default "save")
 ---   .on_submit fun(values: table<string, any>, done: fun(err: string|nil))
 ---   .on_cancel fun()
 ---   .on_test   fun(values: table<string, any>, done: fun(ok: boolean, err: string|nil))|nil
@@ -481,6 +552,7 @@ function M.open(opts)
     label_w     = label_w,
     width       = width,
     error       = nil,
+    submit_label = opts.submit_label or "save",
     on_submit   = opts.on_submit,
     on_cancel   = opts.on_cancel,
     on_test     = opts.on_test,

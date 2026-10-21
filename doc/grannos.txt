@@ -11,15 +11,16 @@ CONTENTS                                                    *grannos-contents*
   3. Setup .............................................. |grannos-setup|
   4. Connections panel .................................. |grannos-connections|
   5. Commands ........................................... |grannos-commands|
-  6. Query log .......................................... |grannos-query-log|
-  7. Saved queries ...................................... |grannos-saved-queries|
-  8. Explorer ........................................... |grannos-explorer|
-  9. Results window ..................................... |grannos-results|
- 10. Completion ......................................... |grannos-completion|
- 11. Lua API ............................................ |grannos-api|
- 12. Configuration ...................................... |grannos-config|
- 13. Supported databases ................................ |grannos-drivers|
- 14. Health check ....................................... |grannos-health|
+  6. Query parameters ................................... |grannos-query-params|
+  7. Query log .......................................... |grannos-query-log|
+  8. Saved queries ...................................... |grannos-saved-queries|
+  9. Explorer ........................................... |grannos-explorer|
+ 10. Results window ..................................... |grannos-results|
+ 11. Completion ......................................... |grannos-completion|
+ 12. Lua API ............................................ |grannos-api|
+ 13. Configuration ...................................... |grannos-config|
+ 14. Supported databases ................................ |grannos-drivers|
+ 15. Health check ....................................... |grannos-health|
 
 ================================================================================
 INTRODUCTION                                                   *grannos-intro*
@@ -259,6 +260,43 @@ with |grannos-auto_attach|.
     that starts and answers `capabilities` with a compatible protocol
     version, and that everything else the plugin needs is in place.
     See |grannos-health|.
+
+================================================================================
+QUERY PARAMETERS                                     *grannos-query-params*
+
+A SQL query may contain placeholders that are filled in each time it runs.
+When the query (or every statement of a batch, together) contains any,
+executing it opens a "Query Parameters" form with one field per distinct
+name before anything is sent. The values are sent as real bind parameters,
+never spliced into the query text, so they need no quoting or escaping.
+
+  `{{name}}`      A single value. Every occurrence of the same name is bound
+                to the same value.
+
+  `{{name[]}}`    A list, expanded to one bind per item so it can stand in an
+                `IN` clause: >sql
+                    SELECT * FROM orders
+                    WHERE customer_id = {{customer}}
+                      AND status IN ({{statuses[]}})
+<
+                Its field is free text: each non-blank line is one item,
+                trimmed. An empty list becomes `NULL`, so `IN ({{xs[]}})`
+                matches nothing rather than failing on `IN ()`.
+
+Every value is bound as a string; the database converts it to the type of
+the column it is compared with. A placeholder inside a string literal, a
+quoted identifier or a comment is left as written. One name cannot be both a
+single value and a list in the same query.
+
+In the form, <CR> edits the field under the cursor and <C-s> runs the query
+(q/<Esc> cancels it). A list field opens a multi-line editor: type one item
+per line, then <C-s> to keep the text, or <Esc> in normal mode to discard
+it. The form remembers the values last entered on each connection for the
+rest of the session, so re-running a query (including from the results
+window) only needs <C-s>.
+
+Supported drivers: PostgreSQL, SQLite, DuckDB, SQL Server and Oracle. On
+other drivers the braces are sent as written.
 
 ================================================================================
 QUERY LOG                                               *grannos-query-log*

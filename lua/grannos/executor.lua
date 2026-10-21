@@ -8,6 +8,7 @@ local gutter      = require("grannos.ui.gutter")
 local log         = require("grannos.log")
 local ts_queries  = require("grannos.ts_queries")
 local devtools    = require("grannos.devtools")
+local query_params = require("grannos.query_params")
 
 -- Past-tense verb shown for DML statements, keyed by leading keyword.
 local DML_VERBS = {
@@ -52,15 +53,19 @@ local function dispatch_batch_result(idx, total, result, sql)
 end
 
 --- Send a single execute request to the backend and return its request id.
+--- `sql`'s query parameters, if any, are bound from `values`.
 --- @param conn        ConnSession
 --- @param sql         string
+--- @param values      table<string, string|string[]>|nil  query parameter values; see query_params
 --- @param on_done     fun(err: string|nil, result: any)
 --- @param on_progress fun(progress: table)|nil
 --- @return integer|nil
-local function execute(conn, sql, on_done, on_progress)
+local function execute(conn, sql, values, on_done, on_progress)
+  local query, binds = sql, {}
+  if values then query, binds = query_params.bind(sql, conn.driver, values) end
   return client.request(
     "execute",
-    { connection_id = conn.conn_id, query = sql, params = {} },
+    { connection_id = conn.conn_id, query = query, params = binds },
     on_done,
     on_progress)
 end
@@ -75,13 +80,14 @@ local update_log_from_result  -- forward declaration; defined below run_batch / 
 --- @param bufnr      integer|nil
 --- @param first_line integer|nil  0-indexed first line of the batch in bufnr
 --- @param had_error  boolean      true if any earlier statement already failed
-local function run_batch(queries, conn, idx, bufnr, first_line, had_error)
+--- @param values     table<string, string|string[]>|nil  query parameter values
+local function run_batch(queries, conn, idx, bufnr, first_line, had_error, values)
   local q           = queries[idx]
   local source_line = (bufnr and first_line ~= nil) and (first_line + q.line) or nil
   local log_id      = log.add(conn.key, bufnr, source_line, q.sql)
   local gh          = (bufnr and first_line ~= nil)
       and gutter.show_running(bufnr, first_line + q.line) or nil
-  local req_id = execute(conn, q.sql, function(err, result)
+  local req_id = execute(conn, q.sql, values, function(err, result)
     vim.schedule(function()
       gutter.unregister_request(gh)
       if err then
@@ -95,7 +101,7 @@ local function run_batch(queries, conn, idx, bufnr, first_line, had_error)
         update_log_from_result(conn.key, log_id, result, q.sql)
       end
       if idx < #queries then
-        run_batch(queries, conn, idx + 1, bufnr, first_line, had_error)
+        run_batch(queries, conn, idx + 1, bufnr, first_line, had_error, values)
       end
     end)
   end)
@@ -137,9 +143,10 @@ end
 --- @param conn_key string
 --- @param log_id   string
 --- @param end_line integer|nil  0-indexed last line of the query in the source buffer
-local function run_single(conn, sql, gh, conn_key, log_id, end_line)
+--- @param values   table<string, string|string[]>|nil  query parameter values
+local function run_single(conn, sql, gh, conn_key, log_id, end_line, values)
   results.show_loading("Executing…")
-  local req_id = execute(conn, sql,
+  local req_id = execute(conn, sql, values,
     function(err, result)
       vim.schedule(function()
         gutter.unregister_request(gh)
@@ -201,9 +208,27 @@ local function check_confirm_writes(conn, bufnr, first_line, query, callback)
   end)
 end
 
+--- Prompt for `query`'s parameters when it has any and `conn`'s driver takes
+--- them, then call `callback` with the values entered — or with nil straight
+--- away when there is nothing to ask. Not called when the prompt is cancelled.
+--- @param conn     ConnSession
+--- @param query    string
+--- @param callback fun(values: table<string, string|string[]>|nil)
+local function with_params(conn, query, callback)
+  if not query_params.supports(conn.driver) then callback(nil) return end
+  local params, err = query_params.find(query)
+  if not params then
+    vim.notify("grannos: " .. err, vim.log.levels.ERROR)
+    return
+  end
+  if #params == 0 then callback(nil) return end
+  query_params.prompt(conn.key, params, callback)
+end
+
 --- Execute `query` against `conn`.
 --- When treesitter is available and multiple statements are found in the buffer
---- range, they are run as a labelled batch.
+--- range, they are run as a labelled batch. `{{name}}` / `{{name[]}}` query
+--- parameters are prompted for first and bound into every statement.
 --- @param conn       ConnSession
 --- @param query      string
 --- @param bufnr      integer|nil       source buffer (for gutter marks and splitting)
@@ -211,46 +236,48 @@ end
 function M.run(conn, query, bufnr, first_line)
   check_confirm_writes(conn, bufnr, first_line, query, function(proceed)
     if not proceed then return end
+    with_params(conn, query, function(values)
 
-    results.set_conn_name(conn.key, conn.driver_label, bufnr)
-    local ft = (bufnr and vim.api.nvim_buf_is_valid(bufnr)) and vim.bo[bufnr].filetype or ""
-    results.set_query(query, ft, bufnr, first_line)
+      results.set_conn_name(conn.key, conn.driver_label, bufnr)
+      local ft = (bufnr and vim.api.nvim_buf_is_valid(bufnr)) and vim.bo[bufnr].filetype or ""
+      results.set_query(query, ft, bufnr, first_line)
 
-    local queries
-    if bufnr and first_line ~= nil then
-      local nlines   = select(2, query:gsub("\n", ""))
-      local end_row  = first_line + nlines
-      local splitter = devtools.applies(conn) and devtools or ts_queries
-      local stmts    = splitter.statements_in_range(bufnr, first_line, end_row)
-      if stmts and #stmts > 1 then
-        local first_s = stmts[1]
-        local last_s  = stmts[#stmts]
-        -- Only split when all statements are fully contained in the queried range.
-        -- end_row is exclusive in treesitter, so allow off-by-one vs end_row.
-        if first_s.start_row >= first_line and last_s.end_row <= end_row + 1 then
-          queries = {}
-          for _, s in ipairs(stmts) do
-            table.insert(queries, { sql = s.text, line = s.start_row - first_line })
+      local queries
+      if bufnr and first_line ~= nil then
+        local nlines   = select(2, query:gsub("\n", ""))
+        local end_row  = first_line + nlines
+        local splitter = devtools.applies(conn) and devtools or ts_queries
+        local stmts    = splitter.statements_in_range(bufnr, first_line, end_row)
+        if stmts and #stmts > 1 then
+          local first_s = stmts[1]
+          local last_s  = stmts[#stmts]
+          -- Only split when all statements are fully contained in the queried range.
+          -- end_row is exclusive in treesitter, so allow off-by-one vs end_row.
+          if first_s.start_row >= first_line and last_s.end_row <= end_row + 1 then
+            queries = {}
+            for _, s in ipairs(stmts) do
+              table.insert(queries, { sql = s.text, line = s.start_row - first_line })
+            end
           end
         end
       end
-    end
 
-    if queries and #queries > 1 then
-      -- Every statement is about to re-run: clear their old marks now rather
-      -- than as each one's turn comes, so none shows a result from before.
-      local nlines = select(2, query:gsub("\n", ""))
-      gutter.clear_range(bufnr, first_line, first_line + nlines)
-      results.begin_batch(#queries)
-      run_batch(queries, conn, 1, bufnr, first_line, false)
-    else
-      local sql      = query
-      local log_id   = log.add(conn.key, bufnr, first_line, sql)
-      local gh       = (bufnr and first_line ~= nil) and gutter.show_running(bufnr, first_line) or nil
-      local nlines   = select(2, sql:gsub("\n", ""))
-      local end_line = (first_line ~= nil) and (first_line + nlines) or nil
-      run_single(conn, sql, gh, conn.key, log_id, end_line)
-    end
+      if queries and #queries > 1 then
+        -- Every statement is about to re-run: clear their old marks now rather
+        -- than as each one's turn comes, so none shows a result from before.
+        local nlines = select(2, query:gsub("\n", ""))
+        gutter.clear_range(bufnr, first_line, first_line + nlines)
+        results.begin_batch(#queries)
+        run_batch(queries, conn, 1, bufnr, first_line, false, values)
+      else
+        local sql      = query
+        local log_id   = log.add(conn.key, bufnr, first_line, sql)
+        local gh       = (bufnr and first_line ~= nil) and gutter.show_running(bufnr, first_line) or nil
+        local nlines   = select(2, sql:gsub("\n", ""))
+        local end_line = (first_line ~= nil) and (first_line + nlines) or nil
+        run_single(conn, sql, gh, conn.key, log_id, end_line, values)
+      end
+    end)
   end)
 end
 
