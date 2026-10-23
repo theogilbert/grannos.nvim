@@ -1099,6 +1099,15 @@ function M.open(conn_id, conn_name, driver, conn_key, driver_label)
   end
 end
 
+--- Return the host window of the explorer shown in `win`, or nil when `win`
+--- is no explorer or its host has closed.
+--- @param win integer
+--- @return integer|nil
+function M.host_of(win)
+  local st = instance_in_win(win)
+  if st and vim.api.nvim_win_is_valid(st.host_win) then return st.host_win end
+end
+
 --- Clear every explorer tree and stop the spinners (called on backend teardown).
 function M.reset()
   for _, st in ipairs(instances) do

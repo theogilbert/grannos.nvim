@@ -441,8 +441,14 @@ Query results are shown in a dedicated buffer named `grannos://results`.
   result is shown under a labelled heading (`── Query 1 / 3 ──`, etc.).
 - Results are paginated; page size is controlled by |grannos-page_size|.
 
-The buffer is read-only and reused across queries. Its direction and size
-are controlled by |grannos-results-split| and |grannos-results-height|.
+The buffer is read-only and reused across queries. Its window is docked
+to the query window the query ran from — split off directly below it, not
+across the whole screen — so two query windows side by side each keep
+their own results under them. Results of a query run from the explorer
+dock under the window that explorer belongs to. Closing a query window
+closes the results window docked to it (the buffer stays listed; pinned
+panes stay open). Direction and size are controlled by
+|grannos-results-split| and |grannos-results-height|.
 
 STATEMENT MESSAGES ~
                                                     *grannos-messages*
@@ -1056,7 +1062,8 @@ keymaps.goto_symbol_key ~
 results.split ~
   Type: `"below"` | `"right"`   Default: `"below"`
 
-  Direction of the results window split.
+  Where the results window docks against the query window it belongs to:
+  below it, or to its right.
 
                                                   *grannos-results-height*
 results.height ~

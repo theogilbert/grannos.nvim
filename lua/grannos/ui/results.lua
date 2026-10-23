@@ -7,10 +7,11 @@
 -- a new results buffer rather than renaming/reusing the old one; the old one stays
 -- listed so the user can still :b back to it.
 -- Buffers are listed so the user can :b between them.
--- One results window per tab: running a query in tab A never clobbers tab B.
--- Within a tab, a results buffer already displayed in some window is refreshed
--- there rather than being moved into the tab's last-used results window, so
--- panes the user has split off for particular connections stay put.
+-- One results window per query window (its host), docked directly below it
+-- (or to its right with `results.split = "right"`), so two query windows side
+-- by side each keep their own results under them. A results buffer already
+-- displayed in some window is refreshed there rather than being moved into the
+-- host's results window, so panes the user has split off stay put.
 -- `p` pins a pane: its buffer is taken out of the (source buffer, connection)
 -- slot so the next query from that source gets a fresh buffer and window, and
 -- the pinned one keeps its results beside it for comparison.
@@ -159,13 +160,14 @@ end
 
 
 -- state.buffers[buf_key] = buf_state        (buf_key = buf_key_for(src_bufnr, conn_key))
--- state.win_ids[tabpage] = win_id            (one results window per tab)
+-- state.win_ids[host_win] = win_id           (one results window per query window)
 -- state.autocmds[win_id] = { scroll, close }
 local state = {
   buffers    = {},
   win_ids    = {},
   autocmds   = {},
   active_src = nil,  -- buf_key set by set_conn_name before each query
+  active_host = nil, -- host window of the active results buffer
   pins       = 0,    -- pinned panes so far, numbering their buffer names
 }
 
@@ -187,13 +189,16 @@ local function win_buf_state_for(win_id)
   return nil
 end
 
---- Return the results window id for the current tab, or nil.
+--- Return the results window the active query's results go to, or nil. From
+--- inside a results window, that window.
 --- @return integer|nil
 local function current_results_win()
-  return state.win_ids[vim.api.nvim_get_current_tabpage()]
+  local cur = vim.api.nvim_get_current_win()
+  if win_buf_state_for(cur) then return cur end
+  return state.active_host and state.win_ids[state.active_host]
 end
 
---- Return the buf_state for the results window in the current tab, or nil.
+--- Return the buf_state for the current results window, or nil.
 --- @return table|nil
 local function win_buf_state()
   return win_buf_state_for(current_results_win())
@@ -258,7 +263,7 @@ local function reset_cursor()
 end
 
 --- Redraw truncation indicator extmarks (◂/▸) based on the current scroll position.
---- @param win_id integer|nil  defaults to the current tab's results window
+--- @param win_id integer|nil  defaults to the current results window
 local function update_truncation_indicators(win_id)
   win_id = win_id or current_results_win()
   if not win_id or not vim.api.nvim_win_is_valid(win_id) then return end
@@ -306,8 +311,8 @@ local function teardown(win_id)
     pcall(vim.api.nvim_del_autocmd, ac.close)
     state.autocmds[win_id] = nil
   end
-  for tab, wid in pairs(state.win_ids) do
-    if wid == win_id then state.win_ids[tab] = nil; break end
+  for host, wid in pairs(state.win_ids) do
+    if wid == win_id then state.win_ids[host] = nil end
   end
 end
 
@@ -349,48 +354,111 @@ vim.api.nvim_create_autocmd("BufWinEnter", {
   callback = function() ensure_win_setup(vim.api.nvim_get_current_win()) end,
 })
 
+--- Whether `win` is a normal window in the current tab showing neither a
+--- grannos panel nor a results buffer — one a results pane can dock under.
+--- @param win integer
+--- @return boolean
+local function can_host(win)
+  if win == 0 or not vim.api.nvim_win_is_valid(win)
+      or vim.api.nvim_win_get_tabpage(win) ~= vim.api.nvim_get_current_tabpage()
+      or vim.api.nvim_win_get_config(win).relative ~= "" then
+    return false
+  end
+  return not vim.startswith(vim.bo[vim.api.nvim_win_get_buf(win)].filetype, "grannos_")
+end
+
+--- Pick the window the results of a query on `src_bufnr` dock under: the
+--- current window when it shows the query buffer, else another window showing
+--- it, else — run from a results pane, the explorer or another grannos panel —
+--- the window that pane belongs to, falling back to the current window.
+--- @param src_bufnr integer|nil
+--- @return integer
+local function resolve_host(src_bufnr)
+  local cur = vim.api.nvim_get_current_win()
+  if src_bufnr and vim.api.nvim_win_get_buf(cur) == src_bufnr and can_host(cur) then return cur end
+  if src_bufnr then
+    for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+      if vim.api.nvim_win_get_buf(win) == src_bufnr and can_host(win) then return win end
+    end
+  end
+  if win_buf_state_for(cur) then
+    for host, wid in pairs(state.win_ids) do
+      if wid == cur and vim.api.nvim_win_is_valid(host) then return host end
+    end
+    -- A pane whose query window is gone is its own host: results run from it
+    -- replace its content rather than docking a second pane under it.
+    state.win_ids[cur] = cur
+    return cur
+  end
+  local explorer_host = require("grannos.ui.explorer").host_of(cur)
+  if explorer_host then return explorer_host end
+  if can_host(cur) then return cur end
+  local prev = vim.fn.win_getid(vim.fn.winnr("#"))
+  if can_host(prev) then return prev end
+  for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    if can_host(win) then return win end
+  end
+  return cur
+end
+
 --- Return the last non-floating window in the current tab showing a pinned
---- results buffer, or nil.
+--- results buffer docked under `host`, or nil.
+--- @param host integer
 --- @return integer|nil
-local function last_pinned_win()
+local function last_pinned_win(host)
   local found
   for _, win_id in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
     local buf_state = win_buf_state_for(win_id)
-    if buf_state and buf_state.pinned and vim.api.nvim_win_get_config(win_id).relative == "" then
+    if buf_state and buf_state.pinned and buf_state.host == host
+      and vim.api.nvim_win_get_config(win_id).relative == "" then
       found = win_id
     end
   end
   return found
 end
 
---- Open a new results split/vsplit for the current tab. When the tab holds a
---- pinned pane, the new one opens beside it — side by side under a `below`
---- layout, where a second full-width split would stack them and eat editor
---- height — so a pinned result and the next one can be compared.
---- @param buf_id integer
-local function open_win(buf_id)
-  local opts     = config.options.results
-  local pinned   = last_pinned_win()
-  local cmd      = opts.split == "right"
-      and "botright vsplit"
-      or  ("botright " .. opts.height .. "split")
-  local prev_win = vim.api.nvim_get_current_win()
-  local tab      = vim.api.nvim_get_current_tabpage()
+--- Open a new results split docked under (or right of) `buf_state`'s host
+--- window. When the host has a pinned pane, the new one opens beside it — side
+--- by side under a `below` layout, where a second split would stack them and
+--- eat the host's height — so a pinned result and the next one can be compared.
+--- @param buf_state table
+local function open_win(buf_state)
+  local opts   = config.options.results
+  local host   = buf_state.host
+  if not (host and vim.api.nvim_win_is_valid(host)) then host = resolve_host(nil) end
+  local pinned = last_pinned_win(host)
+  local win_id
   if pinned and opts.split ~= "right" then
-    vim.api.nvim_set_current_win(pinned)
-    vim.cmd("rightbelow vsplit")
+    win_id = vim.api.nvim_open_win(buf_state.buffer.buf_id, false, { split = "right", win = pinned })
+  elseif opts.split == "right" then
+    win_id = vim.api.nvim_open_win(buf_state.buffer.buf_id, false, { split = "right", win = host })
   else
-    vim.cmd(cmd)
+    win_id = vim.api.nvim_open_win(buf_state.buffer.buf_id, false,
+      { split = "below", win = host, height = opts.height })
   end
-  local win_id = vim.api.nvim_get_current_win()
-  state.win_ids[tab] = win_id
-  vim.api.nvim_win_set_buf(win_id, buf_id)
-  vim.api.nvim_set_current_win(prev_win)
+  state.win_ids[host] = win_id
+  ensure_win_setup(win_id)
 end
+
+-- A docked results pane goes with its host: closing the query window closes
+-- the results window under it (the buffer stays listed). Pinned panes stay.
+vim.api.nvim_create_autocmd("WinClosed", {
+  group    = vim.api.nvim_create_augroup("GrannosResultsHost", { clear = true }),
+  callback = function(ev)
+    local host = tonumber(ev.match)
+    local win  = host and state.win_ids[host]
+    if not win then return end
+    state.win_ids[host] = nil
+    vim.schedule(function()
+      local buf_state = win_buf_state_for(win)
+      if buf_state and not buf_state.pinned then pcall(vim.api.nvim_win_close, win, false) end
+    end)
+  end,
+})
 
 --- Return a non-floating window in the current tab already displaying `buf_id`, or nil.
 --- Lets a results buffer the user has moved into a window of their own keep that
---- window, instead of being re-displayed in the tab's last-used results window.
+--- window, instead of being re-displayed in its host's results window.
 --- @param buf_id integer
 --- @return integer|nil
 local function win_showing(buf_id)
@@ -403,23 +471,30 @@ local function win_showing(buf_id)
   return nil
 end
 
---- Show `buf_id` in the window already displaying it, else the current tab's results
---- window, else a new split. The window the buffer ends up in becomes the tab's
---- results window, so the scroll/reset helpers act on the pane that got the content.
---- @param buf_id integer
-local function ensure_win(buf_id)
-  local tab      = vim.api.nvim_get_current_tabpage()
+--- Show `buf_state`'s buffer in the window already displaying it, else its
+--- host's results window, else a new split docked under the host. The window
+--- the buffer ends up in becomes the host's results window, so the
+--- scroll/reset helpers act on the pane that got the content.
+--- @param buf_state table
+local function ensure_win(buf_state)
+  local buf_id = buf_state.buffer.buf_id
+  local host   = buf_state.host
+  if not (host and vim.api.nvim_win_is_valid(host)) then
+    host = resolve_host(buf_state.src_bufnr)
+    buf_state.host = host
+  end
+  state.active_host = host
   local existing = win_showing(buf_id)
   if existing then
-    state.win_ids[tab] = existing
+    if existing ~= host then state.win_ids[host] = existing end
     ensure_win_setup(existing)
     return
   end
-  local win_id = state.win_ids[tab]
+  local win_id = state.win_ids[host]
   if win_id and vim.api.nvim_win_is_valid(win_id) then
     vim.api.nvim_win_set_buf(win_id, buf_id)
   else
-    open_win(buf_id)
+    open_win(buf_state)
   end
 end
 
@@ -539,7 +614,7 @@ end
 
 --- Move `buf_state` out of the (source buffer, connection) slot `slot_key`
 --- into a pin slot of its own, rename its buffer with the pin number, and
---- stop its window being the tab's target for the next result.
+--- stop its window being its host's target for the next result.
 --- @param buf_state table
 --- @param slot_key  string  the key it leaves — kept so `unpin_pane` can go back
 local function detach(buf_state, slot_key)
@@ -553,17 +628,17 @@ local function detach(buf_state, slot_key)
   buf_state.slot_name = vim.api.nvim_buf_get_name(buf_state.buffer.buf_id)
   pcall(vim.api.nvim_buf_set_name, buf_state.buffer.buf_id,
     buf_state.slot_name .. (" (pin %d)"):format(state.pins))
-  for tab, win_id in pairs(state.win_ids) do
+  for host, win_id in pairs(state.win_ids) do
     if vim.api.nvim_win_is_valid(win_id)
       and vim.api.nvim_win_get_buf(win_id) == buf_state.buffer.buf_id then
-      state.win_ids[tab] = nil
+      state.win_ids[host] = nil
     end
   end
 end
 
 --- Unpin the pane: put its buf_state back in the (source buffer, connection)
 --- slot it was pinned out of, so the next query from that source lands here
---- again, and make its window the tab's target. A pane that took the slot
+--- again, and make its window its host's target. A pane that took the slot
 --- meanwhile is pinned in its place — its result stays beside this one —
 --- since one pane per slot is the live target and every other one is pinned.
 --- @param buf_state table
@@ -580,7 +655,7 @@ local function unpin_pane(buf_state)
   pcall(vim.api.nvim_buf_set_name, buf_state.buffer.buf_id, buf_state.slot_name)
   buf_state.slot_key, buf_state.slot_name = nil, nil
   local win = win_showing(buf_state.buffer.buf_id)
-  if win then state.win_ids[vim.api.nvim_get_current_tabpage()] = win end
+  if win then state.win_ids[buf_state.host or resolve_host(nil)] = win end
   vim.notify("grannos: unpinned — the next result shows here", vim.log.levels.INFO)
 end
 
@@ -1260,7 +1335,7 @@ function M.show_loading(msg)
   local buf_state = active_buf_state()
   buf_state.table_data  = nil
   buf_state.is_loading  = true
-  ensure_win(buf_state.buffer.buf_id)
+  ensure_win(buf_state)
   buf_state.buffer:set_content({ ICON_RUNNING .. " " .. msg })
   buf_state.buffer:apply_highlight({
     { higroup = "GrannosQueryRunning", start = { 0, 0 }, finish = { 0, -1 } },
@@ -1307,7 +1382,9 @@ function M.set_conn_name(key, driver_label, src_bufnr)
   -- query. `begin_batch` starts a fresh list when this run is a batch too.
   buf_state.segments      = {}
   buf_state.batch_total   = nil
-  state.active_src = buf_key
+  buf_state.host          = resolve_host(src_bufnr)
+  state.active_src  = buf_key
+  state.active_host = buf_state.host
 end
 
 --- Record the explore-tree path to the table backing the current results, enabling
@@ -1329,7 +1406,7 @@ end
 function M.begin_batch(n)
   local buf_state = active_buf_state()
   stop_loading(buf_state)
-  ensure_win(buf_state.buffer.buf_id)
+  ensure_win(buf_state)
   buf_state.table_data  = nil
   buf_state.segments    = {}
   buf_state.batch_total = n
@@ -1501,7 +1578,7 @@ function M.show_results(columns, rows, rows_returned, rows_total, duration_ms, m
   buf_state.page           = 1
   buf_state.histogram      = nil
   buf_state.histogram_req  = buf_state.histogram_req + 1
-  ensure_win(buf_state.buffer.buf_id)
+  ensure_win(buf_state)
   render_table(buf_state)
   reset_cursor()
   -- The toggle is sticky per results buffer: once on, every new result of that
@@ -1518,7 +1595,7 @@ function M.show_rows_affected(n, verb, duration_ms, msgs)
   local buf_state = active_buf_state()
   stop_loading(buf_state)
   buf_state.table_data = nil
-  ensure_win(buf_state.buffer.buf_id)
+  ensure_win(buf_state)
   local msg = rows_affected_msg(n, verb)
   if duration_ms then msg = msg .. "  ·  " .. format_duration(duration_ms) end
   local content = { msg }
@@ -1569,7 +1646,7 @@ function M.show_error(msg)
   local buf_state    = active_buf_state()
   stop_loading(buf_state)
   buf_state.table_data = nil
-  ensure_win(buf_state.buffer.buf_id)
+  ensure_win(buf_state)
   local lines = vim.split(msg, "\n", { plain = true })
   lines[1]    = "Error: " .. lines[1]
   buf_state.buffer:set_content(lines)
@@ -1585,14 +1662,14 @@ function M.show_message(msg)
   local buf_state = active_buf_state()
   stop_loading(buf_state)
   buf_state.table_data = nil
-  ensure_win(buf_state.buffer.buf_id)
+  ensure_win(buf_state)
   buf_state.buffer:set_content({ msg })
   buf_state.buffer:apply_highlight({})
   reset_cursor()
 end
 
---- Toggle the documents-over-time histogram of the current tab's results
---- window — what `gh` does there. A no-op when the tab has no results window.
+--- Toggle the documents-over-time histogram of the current results
+--- window — what `gh` does there. A no-op when there is no results window.
 function M.toggle_histogram()
   local buf_state = win_buf_state()
   if buf_state then toggle_histogram(buf_state) end
