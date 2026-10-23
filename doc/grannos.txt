@@ -402,7 +402,9 @@ Each window gets its own explorer, so two windows side by side can browse
 different connections; running |:DbExplore| again from a window (or from
 its explorer) focuses that window's explorer. Opened from a grannos panel
 such as the connections sidebar, it belongs to the window you came from.
-Closing a window closes its explorer too.
+Closing a window closes its explorer too, and so does deleting the query
+buffer it was opened for (|:bdelete|, or a buffer-delete plugin that keeps
+the window open).
 The window title bar (winbar) displays the connection name and driver.
 The buffer is named `grannos://explorer/<n> [name (driver)]`.
 
@@ -446,8 +448,12 @@ to the query window the query ran from — split off directly below it, not
 across the whole screen — so two query windows side by side each keep
 their own results under them. Results of a query run from the explorer
 dock under the window that explorer belongs to. Closing a query window
-closes the results window docked to it (the buffer stays listed; pinned
-panes stay open). Direction and size are controlled by
+closes the results window docked to it, and deleting a query buffer closes
+every results window showing its results (the results buffer stays listed;
+pinned panes stay open). When those panes are all that would be left in the
+tab, closing the query window with |:quit| quits as it would on a last
+window, while deleting its buffer leaves an ordinary window showing the
+most recent buffer, as |:bdelete| does. Direction and size are controlled by
 |grannos-results-split| and |grannos-results-height|.
 
 STATEMENT MESSAGES ~

@@ -78,6 +78,7 @@ end
 --- @field id                integer          distinguishes this explorer's buffer name
 --- @field buffer            table|nil        Buffer instance, nil until first open
 --- @field host_win          integer          window the sidebar was opened from
+--- @field host_buf          integer|nil      buffer that window showed when the sidebar was last opened
 --- @field tree              ExplorerNode[]
 --- @field conn_id           any
 --- @field conn_label        string|nil       "name (driver)" shown in the buffer name
@@ -1023,16 +1024,46 @@ local function remove_instance(idx)
   end
 end
 
+local augroup = vim.api.nvim_create_augroup("GrannosExplorer", { clear = true })
+
+--- Close every explorer `matches` selects and tear it down.
+--- @param matches fun(st: ExplorerState): boolean
+--- @param quit    boolean  passed to window.close_panels
+local function close_instances(matches, quit)
+  local wins = {}
+  for _, st in ipairs(instances) do
+    if matches(st) and st.buffer and st.buffer:is_valid() then
+      vim.list_extend(wins, vim.fn.win_findbuf(st.buffer.buf_id))
+    end
+  end
+  window.close_panels(wins, quit)
+  for i = #instances, 1, -1 do
+    if matches(instances[i]) then remove_instance(i) end
+  end
+end
+
 -- An explorer lives as long as its host window: closing the host takes the
 -- sidebar beside it along.
 vim.api.nvim_create_autocmd("WinClosed", {
-  group    = vim.api.nvim_create_augroup("GrannosExplorer", { clear = true }),
+  group    = augroup,
   callback = function(ev)
-    local win = tonumber(ev.match)
+    local win, buf = tonumber(ev.match), ev.buf
     vim.schedule(function()
-      for i = #instances, 1, -1 do
-        if instances[i].host_win == win then remove_instance(i) end
-      end
+      close_instances(function(st) return st.host_win == win end, window.closed_by_quit(buf))
+    end)
+  end,
+})
+
+-- ...and as long as the query buffer it was opened for: deleting that buffer
+-- closes the sidebar even when the window stays open — a buffer-delete plugin
+-- that keeps the layout switches the window to another buffer first, so this
+-- goes by the buffer remembered at open rather than the one shown now.
+vim.api.nvim_create_autocmd({ "BufDelete", "BufWipeout" }, {
+  group    = augroup,
+  callback = function(ev)
+    local buf = ev.buf
+    vim.schedule(function()
+      close_instances(function(st) return st.host_buf == buf end, false)
     end)
   end,
 })
@@ -1066,6 +1097,7 @@ end
 function M.open(conn_id, conn_name, driver, conn_key, driver_label)
   local host = resolve_host()
   local st   = get_or_create_instance(host)
+  st.host_buf = vim.api.nvim_win_get_buf(host)
   get_or_create_buffer(st)
 
   -- Reset the tree when switching to a different connection.
@@ -1089,7 +1121,7 @@ function M.open(conn_id, conn_name, driver, conn_key, driver_label)
     -- Escape % so statusline format doesn't misinterpret it.
     local label = st.conn_label:gsub("%%", "%%%%")
     vim.api.nvim_set_option_value("winbar",
-      "%#GrannosHeaderRow#  " .. label, { win = win })
+      "%#GrannosHeaderRow#  " .. label, { win = win, scope = "local" })
   end
 
   if #st.tree == 0 then

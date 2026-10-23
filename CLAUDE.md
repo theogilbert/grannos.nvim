@@ -33,7 +33,7 @@ grannos.nvim is a Neovim database-client plugin that delegates all database work
 | `lua/grannos/health.lua` | `:checkhealth grannos`: verifies setup, backend install, protocol version, parsers |
 | `lua/grannos/buffer.lua` | Generic buffer class: content, keymaps, `g?` help float |
 | `lua/grannos/ui/connections.lua` | Connections panel (right sidebar) |
-| `lua/grannos/ui/explorer.lua` | Schema explorer: a sidebar split to the left of the window it was opened from, one per window, closed with that window |
+| `lua/grannos/ui/explorer.lua` | Schema explorer: a sidebar split to the left of the window it was opened from, one per window, closed with that window or the query buffer it was opened for |
 | `lua/grannos/ui/results.lua` | Query results panel: a split docked below (or right of) the query window it serves, one per query window |
 | `lua/grannos/ui/spinner.lua` | Refcounted braille spinner driven by a libuv timer |
 | `lua/grannos/ui/gutter.lua` | Gutter extmarks: running/success/error icons |
@@ -51,7 +51,7 @@ grannos.nvim is a Neovim database-client plugin that delegates all database work
 | `lua/grannos/ui/hover.lua` | Generic non-focusable hover float near the cursor |
 | `lua/grannos/ui/histogram.lua` | Pure renderer for an `execute.histogram` result: documents over time as a block-glyph column chart, toggled by `gh` in the results pane |
 | `lua/grannos/ui/content_buffer.lua` | Opens `explore.download` content (base64) in a scratch buffer; shared by the explorer and (later) results-pane LOB downloads |
-| `lua/grannos/ui/window.lua` | Sidebar window helper |
+| `lua/grannos/ui/window.lua` | Sidebar window helper; `close_panels` closes docked panes with their query window or buffer, handling the case where they are all that is left in the tab |
 | `lua/grannos/log.lua` | In-memory query log (per connection) |
 | `lua/grannos/selection.lua` | Visual selection extraction |
 | `lua/grannos/ts_queries.lua` | Treesitter helpers: statement at cursor, statements in range |

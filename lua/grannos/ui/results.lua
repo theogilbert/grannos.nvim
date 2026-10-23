@@ -30,6 +30,7 @@ local column_ui      = require("grannos.ui.column")
 local messages       = require("grannos.messages")
 local histogram      = require("grannos.ui.histogram")
 local row_detail     = require("grannos.ui.row_detail")
+local window         = require("grannos.ui.window")
 
 local M = {}
 
@@ -320,11 +321,11 @@ end
 --- buffer should have, regardless of how it was opened.
 --- @param win_id integer
 local function configure_win_chrome(win_id)
-  vim.api.nvim_set_option_value("number",       false, { win = win_id })
-  vim.api.nvim_set_option_value("signcolumn",   "no",  { win = win_id })
-  vim.api.nvim_set_option_value("winfixheight", true,  { win = win_id })
-  vim.api.nvim_set_option_value("winfixwidth",  true,  { win = win_id })
-  vim.api.nvim_set_option_value("wrap",         false, { win = win_id })
+  vim.api.nvim_set_option_value("number",       false, { win = win_id, scope = "local" })
+  vim.api.nvim_set_option_value("signcolumn",   "no",  { win = win_id, scope = "local" })
+  vim.api.nvim_set_option_value("winfixheight", true,  { win = win_id, scope = "local" })
+  vim.api.nvim_set_option_value("winfixwidth",  true,  { win = win_id, scope = "local" })
+  vim.api.nvim_set_option_value("wrap",         false, { win = win_id, scope = "local" })
   vim.api.nvim_win_set_hl_ns(win_id, hl.NS_ID)
 end
 
@@ -440,18 +441,42 @@ local function open_win(buf_state)
   ensure_win_setup(win_id)
 end
 
+local host_augroup = vim.api.nvim_create_augroup("GrannosResultsHost", { clear = true })
+
 -- A docked results pane goes with its host: closing the query window closes
 -- the results window under it (the buffer stays listed). Pinned panes stay.
 vim.api.nvim_create_autocmd("WinClosed", {
-  group    = vim.api.nvim_create_augroup("GrannosResultsHost", { clear = true }),
+  group    = host_augroup,
   callback = function(ev)
     local host = tonumber(ev.match)
     local win  = host and state.win_ids[host]
-    if not win then return end
+    if not win or win == host then return end
     state.win_ids[host] = nil
+    local buf = ev.buf
     vim.schedule(function()
       local buf_state = win_buf_state_for(win)
-      if buf_state and not buf_state.pinned then pcall(vim.api.nvim_win_close, win, false) end
+      if buf_state and not buf_state.pinned then window.close_panels({ win }, window.closed_by_quit(buf)) end
+    end)
+  end,
+})
+
+-- Deleting the query buffer closes the results panes it produced, wherever
+-- they are — even when a buffer-delete plugin keeps its window open.
+-- Pinned panes stay.
+vim.api.nvim_create_autocmd({ "BufDelete", "BufWipeout" }, {
+  group    = host_augroup,
+  callback = function(ev)
+    local buf = ev.buf
+    vim.schedule(function()
+      local wins = {}
+      for _, buf_state in pairs(state.buffers) do
+        if buf_state.src_bufnr == buf and not buf_state.pinned then
+          for _, win in ipairs(vim.fn.win_findbuf(buf_state.buffer.buf_id)) do
+            if vim.api.nvim_win_get_config(win).relative == "" then wins[#wins + 1] = win end
+          end
+        end
+      end
+      window.close_panels(wins, false)
     end)
   end,
 })
