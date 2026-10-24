@@ -20,6 +20,9 @@
 ; Aliases (SELECT foo AS bar, FROM t AS t1, etc.)
 (select_item alias: (identifier) @variable)
 (from_clause alias: (identifier) @variable)
+
+; DuckDB file path used as a table: FROM 'data/*.csv'
+(from_clause file: (string) @string.special.path)
 (update_statement alias: (identifier) @variable)
 (delete_statement alias: (identifier) @variable)
 
@@ -472,3 +475,9 @@
 ")" @punctuation.bracket
 "[" @punctuation.bracket
 "]" @punctuation.bracket
+"{" @punctuation.bracket
+"}" @punctuation.bracket
+":" @punctuation.delimiter
+
+; DuckDB struct literal keys: {'a': 1, b: 2}
+(struct_field key: _ @property)
