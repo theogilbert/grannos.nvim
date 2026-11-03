@@ -83,6 +83,11 @@ M.defaults = {
     -- Height, in rows, of the documents-over-time chart that `gh` toggles
     -- above the table on drivers that support it (Elasticsearch).
     histogram_height = 6,
+
+    -- Intervals `gr` offers for auto-refreshing a results pane (re-running its
+    -- query on a timer, like Kibana's refresh interval). Auto-refresh is off
+    -- until chosen; "Custom…" in the picker takes any other interval.
+    auto_refresh_intervals = { "5s", "10s", "30s", "1m", "5m", "15m", "30m", "1h" },
   },
 }
 

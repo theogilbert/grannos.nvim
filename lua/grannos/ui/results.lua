@@ -48,6 +48,7 @@ local fetch_histogram           -- forward declaration; defined after render_tab
 local toggle_histogram          -- forward declaration; defined after fetch_histogram
 local show_histogram_hover      -- forward declaration; defined after toggle_histogram
 local hide_column_at_cursor     -- forward declaration; defined after render_table
+local draw_auto_refresh         -- forward declaration; defined after rerun_query
 
 --- Return a copy of `rules` with every row shifted down by `offset` lines.
 --- @param rules  table[]  highlight rules with 0-indexed relative rows
@@ -256,9 +257,13 @@ end
 
 
 --- Reset the results window cursor to line 1, column 0, with no horizontal scroll.
+--- Left alone after an auto-refresh, so a pane refreshing under the user
+--- never yanks the cursor away from the row they are reading.
 local function reset_cursor()
   local win_id = current_results_win()
   if not win_id or not vim.api.nvim_win_is_valid(win_id) then return end
+  local buf_state = win_buf_state_for(win_id)
+  if buf_state and buf_state.auto_running then return end
   vim.api.nvim_win_set_cursor(win_id, { 1, 0 })
   vim.api.nvim_win_call(win_id, function() vim.fn.winrestview({ leftcol = 0 }) end)
 end
@@ -496,6 +501,16 @@ local function win_showing(buf_id)
   return nil
 end
 
+--- Return a non-floating window in any tab displaying `buf_id`, or nil.
+--- @param buf_id integer
+--- @return integer|nil
+local function win_showing_anywhere(buf_id)
+  for _, win_id in ipairs(vim.fn.win_findbuf(buf_id)) do
+    if vim.api.nvim_win_get_config(win_id).relative == "" then return win_id end
+  end
+  return nil
+end
+
 --- Show `buf_state`'s buffer in the window already displaying it, else its
 --- host's results window, else a new split docked under the host. The window
 --- the buffer ends up in becomes the host's results window, so the
@@ -509,7 +524,10 @@ local function ensure_win(buf_state)
     buf_state.host = host
   end
   state.active_host = host
+  -- An auto-refresh renders wherever the pane already is, in whatever tab,
+  -- rather than docking a copy in the tab the user has moved to.
   local existing = win_showing(buf_id)
+    or (buf_state.auto_running and win_showing_anywhere(buf_id))
   if existing then
     if existing ~= host then state.win_ids[host] = existing end
     ensure_win_setup(existing)
@@ -591,30 +609,57 @@ local function show_source_query(buf_state)
   end
 end
 
+--- Return the `state.buffers` key `buf_state` is stored under, or nil.
+--- @param buf_state table
+--- @return string|nil
+local function key_of(buf_state)
+  for key, bs in pairs(state.buffers) do
+    if bs == buf_state then return key end
+  end
+  return nil
+end
+
+--- Whether `buf_state` is still waiting on a query: a single result not in
+--- yet, or a batch with statements still to report.
+--- @param buf_state table
+--- @return boolean
+local function is_busy(buf_state)
+  return buf_state.is_loading
+    or (buf_state.batch_total ~= nil and #buf_state.segments < buf_state.batch_total)
+end
+
+local stop_auto_refresh  -- forward declaration; defined below rerun_query
+
 --- Run the query that produced the current results again, against the same
 --- connection and from the same source buffer, so the results land back in this
---- buffer. The source position is passed along only while the buffer still holds
---- the same text there, so gutter marks and batch splitting never act on lines
---- the user has since edited; otherwise the stored text runs as one statement.
+--- buffer (pinned or not). The source position is passed along only while the
+--- buffer still holds the same text there, so gutter marks and batch splitting
+--- never act on lines the user has since edited; otherwise the stored text runs
+--- as one statement.
+--- With `auto` (an auto-refresh tick) the parameter values of the last run are
+--- reused rather than prompted for, the run stays out of the query log, and a
+--- write that would need confirming stops the auto-refresh instead of asking.
 --- @param buf_state table
-local function rerun_query(buf_state)
-  if buf_state.is_loading then
-    vim.notify("grannos: query still running", vim.log.levels.INFO)
-    return
+--- @param auto      boolean|nil
+--- @return boolean  false when the query cannot be re-run at all
+local function rerun_query(buf_state, auto)
+  if is_busy(buf_state) then
+    if not auto then vim.notify("grannos: query still running", vim.log.levels.INFO) end
+    return true
   end
   if not buf_state.query then
     vim.notify("grannos: no query to re-run", vim.log.levels.INFO)
-    return
+    return false
   end
   local conn = buf_state.conn_key and require("grannos").get_conn(buf_state.conn_key)
   if not conn then
     vim.notify("grannos: connection is no longer open", vim.log.levels.WARN)
-    return
+    return false
   end
   local src_bufnr = buf_state.src_bufnr
   if src_bufnr and not vim.api.nvim_buf_is_valid(src_bufnr) then
     vim.notify("grannos: source buffer is gone", vim.log.levels.WARN)
-    return
+    return false
   end
   local first_line = nil
   if src_bufnr and buf_state.first_line then
@@ -624,17 +669,150 @@ local function rerun_query(buf_state)
       first_line = buf_state.first_line
     end
   end
-  require("grannos.executor").run(conn, buf_state.query, src_bufnr, first_line)
+  require("grannos.executor").run(conn, buf_state.query, src_bufnr, first_line, {
+    target     = key_of(buf_state),
+    auto       = auto,
+    values     = auto and buf_state.query_values or nil,
+    on_refused = auto and function()
+      stop_auto_refresh(buf_state)
+      vim.notify("grannos: auto-refresh stopped — the query writes and writes need confirming",
+        vim.log.levels.WARN)
+    end or nil,
+  })
+  return true
 end
 
---- Return the `state.buffers` key `buf_state` is stored under, or nil.
+local AUTO_NS = vim.api.nvim_create_namespace("GrannosAutoRefresh")
+
+--- Parse an interval such as "30s", "5m", "1h" or a bare number of seconds
+--- into milliseconds, or nil when it is not a positive duration.
+--- @param text string
+--- @return integer|nil
+function M.parse_interval(text)
+  local n, unit = vim.trim(text or ""):lower():match("^(%d+%.?%d*)%s*(%a*)$")
+  n = tonumber(n)
+  local mult = ({ [""] = 1000, s = 1000, sec = 1000, m = 60000, min = 60000, h = 3600000 })[unit]
+  if not n or not mult or n <= 0 then return nil end
+  return math.floor(n * mult)
+end
+
+--- Format a millisecond interval the way the picker lists it ("30s", "5m", "1h").
+--- @param ms integer
+--- @return string
+local function format_interval(ms)
+  if ms % 3600000 == 0 then return (ms / 3600000) .. "h" end
+  if ms % 60000 == 0 then return (ms / 60000) .. "m" end
+  return ("%g"):format(ms / 1000) .. "s"
+end
+
+--- Draw (or clear) the auto-refresh indicator at the end of the pane's first
+--- line: the interval, marked with the running icon while a refresh is out,
+--- and when the last refresh landed.
 --- @param buf_state table
---- @return string|nil
-local function key_of(buf_state)
-  for key, bs in pairs(state.buffers) do
-    if bs == buf_state then return key end
+draw_auto_refresh = function(buf_state)
+  local buf_id = buf_state.buffer.buf_id
+  if not vim.api.nvim_buf_is_valid(buf_id) then return end
+  vim.api.nvim_buf_clear_namespace(buf_id, AUTO_NS, 0, -1)
+  local ar = buf_state.auto_refresh
+  if not ar then return end
+  local icon = (buf_state.auto_running and is_busy(buf_state)) and ICON_RUNNING or "⟳"
+  local text = "  " .. icon .. " every " .. format_interval(ar.interval_ms)
+  if buf_state.last_refresh then
+    text = text .. "  ·  last " .. os.date("%Y-%m-%d %H:%M:%S", buf_state.last_refresh)
   end
-  return nil
+  vim.api.nvim_buf_set_extmark(buf_id, AUTO_NS, 0, 0, {
+    virt_text     = { { text, "GrannosRowCount" } },
+    virt_text_pos = "eol",
+  })
+end
+
+--- Stop `buf_state`'s auto-refresh, if running, and clear its indicator.
+--- @param buf_state table
+stop_auto_refresh = function(buf_state)
+  local ar = buf_state.auto_refresh
+  if not ar then return end
+  buf_state.auto_refresh = nil
+  ar.timer:stop()
+  if not ar.timer:is_closing() then ar.timer:close() end
+  draw_auto_refresh(buf_state)
+end
+
+--- One auto-refresh tick: re-run the pane's query unless the last run is
+--- still out. The refresh stops once no window shows the pane any more, or
+--- once its query can no longer be re-run.
+--- @param buf_state table
+local function auto_refresh_tick(buf_state)
+  if not buf_state.auto_refresh then return end
+  if not buf_state.buffer:is_valid() or #vim.fn.win_findbuf(buf_state.buffer.buf_id) == 0 then
+    stop_auto_refresh(buf_state)
+    return
+  end
+  if is_busy(buf_state) then return end
+  if not rerun_query(buf_state, true) then
+    stop_auto_refresh(buf_state)
+    vim.notify("grannos: auto-refresh stopped", vim.log.levels.WARN)
+  end
+end
+
+--- Re-run `buf_state`'s query every `interval_ms` milliseconds, replacing any
+--- auto-refresh already running on it; nil turns auto-refresh off.
+--- @param buf_state   table
+--- @param interval_ms integer|nil
+local function set_auto_refresh(buf_state, interval_ms)
+  stop_auto_refresh(buf_state)
+  if not interval_ms then return end
+  local timer = vim.uv.new_timer()
+  buf_state.auto_refresh = { interval_ms = interval_ms, timer = timer }
+  buf_state.last_refresh = nil
+  timer:start(interval_ms, interval_ms, vim.schedule_wrap(function()
+    if buf_state.auto_refresh and buf_state.auto_refresh.timer == timer then
+      auto_refresh_tick(buf_state)
+    end
+  end))
+  draw_auto_refresh(buf_state)
+end
+
+--- `gr`: ask for an auto-refresh interval for the pane — off, one of
+--- `results.auto_refresh_intervals`, or a custom one — and apply it.
+--- @param buf_state table
+local function pick_auto_refresh(buf_state)
+  local current = buf_state.auto_refresh and buf_state.auto_refresh.interval_ms
+  local items   = { { label = "Off" } }
+  for _, text in ipairs(config.options.results.auto_refresh_intervals or {}) do
+    local ms = M.parse_interval(text)
+    if ms then items[#items + 1] = { label = "Every " .. format_interval(ms), ms = ms } end
+  end
+  items[#items + 1] = { label = "Custom…", custom = true }
+  vim.ui.select(items, {
+    prompt      = "Auto-refresh:",
+    format_item = function(item)
+      local on = (item.ms and item.ms == current) or (not item.ms and not item.custom and not current)
+      return (on and "● " or "  ") .. item.label
+    end,
+  }, function(item)
+    if not item then return end
+    if not item.custom then
+      if item.ms and not buf_state.query then
+        vim.notify("grannos: no query to refresh", vim.log.levels.INFO)
+        return
+      end
+      set_auto_refresh(buf_state, item.ms)
+      return
+    end
+    vim.ui.input({ prompt = "Refresh every (e.g. 45s, 2m, 1h): " }, function(text)
+      if not text or text == "" then return end
+      local ms = M.parse_interval(text)
+      if not ms then
+        vim.notify("grannos: not an interval: " .. text, vim.log.levels.WARN)
+        return
+      end
+      if not buf_state.query then
+        vim.notify("grannos: no query to refresh", vim.log.levels.INFO)
+        return
+      end
+      set_auto_refresh(buf_state, ms)
+    end)
+  end)
 end
 
 --- Move `buf_state` out of the (source buffer, connection) slot `slot_key`
@@ -952,7 +1130,18 @@ local function get_or_create_buf_state(buf_key, buf_title)
   vim.bo[buf.buf_id].buflisted = true
   table_fmt.setup_buf_hl(buf.buf_id)
 
-  local buf_state = {
+  local buf_state
+  -- Replacing every line pushes the auto-refresh indicator's extmark off the
+  -- first line, so every content write puts it back.
+  local base_set_content = buf.set_content
+  --- Set the buffer's lines, then redraw the auto-refresh indicator.
+  --- @param lines string[]|string
+  function buf:set_content(lines)
+    base_set_content(self, lines)
+    if buf_state then draw_auto_refresh(buf_state) end
+  end
+
+  buf_state = {
     buffer        = buf,
     table_data    = nil,
     segments      = {},
@@ -974,6 +1163,10 @@ local function get_or_create_buf_state(buf_key, buf_title)
     sep_columns   = {},   -- column name -> true, thousands separator toggled on via `t`
     is_loading    = false,
     pinned        = false, -- `p`: detached from its buf_key so the next result goes elsewhere
+    query_values  = nil,   -- query parameter values the query last ran with, for auto-refresh
+    auto_refresh  = nil,   -- `gr`: { interval_ms, timer } while the query re-runs on a timer
+    auto_running  = false, -- the run in progress (or last shown) is an auto-refresh tick
+    last_refresh  = nil,   -- os.time() the last auto-refresh result landed, for the indicator
     show_histogram   = false, -- `gh` toggle: chart documents over time above the table
     histogram        = nil,   -- { status = "loading"|"ready"|"error", data|err } for the current query
     histogram_req    = 0,     -- generation counter, so a late response for an old query is dropped
@@ -1017,6 +1210,10 @@ local function get_or_create_buf_state(buf_key, buf_title)
     { desc = "Show source query", silent = true })
   buf:set_keymap("n", "R", function() rerun_query(buf_state) end,
     { desc = "Re-run the query", silent = true })
+  buf:set_keymap("n", "gr", function() pick_auto_refresh(buf_state) end,
+    -- nowait: Neovim's default LSP maps (grn, grr, gra, …) would otherwise
+    -- hold `gr` for 'timeoutlen' waiting for a third key.
+    { desc = "Auto-refresh: re-run the query every X (off by default)", silent = true, nowait = true })
   buf:set_keymap("n", "P", function() pin_pane(buf_state) end,
     { desc = "Pin: keep this pane, show the next result beside it (again: unpin)", silent = true })
   buf:set_keymap("n", "p", function()
@@ -1336,6 +1533,9 @@ local function render_segments(buf_state)
     table.insert(all_rules, { higroup = "GrannosQueryRunning",
       start = { #all_lines - 1, 0 }, finish = { #all_lines - 1, -1 } })
   end
+  if buf_state.auto_running and buf_state.batch_total and #buf_state.segments == buf_state.batch_total then
+    buf_state.last_refresh = os.time()
+  end
   buf_state.buffer:set_content(all_lines)
   buf_state.buffer:apply_highlight(all_rules)
   update_truncation_indicators()
@@ -1346,7 +1546,9 @@ end
 --- Clear `buf_state`'s busy state, if set.
 --- @param buf_state table
 local function stop_loading(buf_state)
+  if buf_state.is_loading and buf_state.auto_running then buf_state.last_refresh = os.time() end
   buf_state.is_loading = false
+  draw_auto_refresh(buf_state)
 end
 
 --- Show a "the plugin is busy" message in the results window, marked with the same
@@ -1358,6 +1560,13 @@ end
 --- @param msg string
 function M.show_loading(msg)
   local buf_state = active_buf_state()
+  if buf_state.auto_running and #vim.fn.win_findbuf(buf_state.buffer.buf_id) > 0 then
+    -- An auto-refresh keeps the last result on screen until the new one is
+    -- in; only the indicator says a refresh is out.
+    buf_state.is_loading = true
+    draw_auto_refresh(buf_state)
+    return
+  end
   buf_state.table_data  = nil
   buf_state.is_loading  = true
   ensure_win(buf_state)
@@ -1374,27 +1583,37 @@ end
 --- @param filetype   string
 --- @param src_bufnr  integer|nil  source buffer the query was run from
 --- @param first_line integer|nil  0-indexed first line of `sql` in `src_bufnr`
-function M.set_query(sql, filetype, src_bufnr, first_line)
+--- @param values     table<string, string|string[]>|nil  query parameter values it ran with
+function M.set_query(sql, filetype, src_bufnr, first_line, values)
   local buf_state = active_buf_state()
   if buf_state then
-    buf_state.query      = sql
-    buf_state.query_ft   = filetype
-    buf_state.src_bufnr  = src_bufnr
-    buf_state.first_line = first_line
+    buf_state.query        = sql
+    buf_state.query_ft     = filetype
+    buf_state.src_bufnr    = src_bufnr
+    buf_state.first_line   = first_line
+    buf_state.query_values = values
   end
 end
 
---- Create (if needed) the results buffer for `src_bufnr` and make it the active source.
+--- Create (if needed) the results buffer for `src_bufnr` and make it the active
+--- source. `opts.target` routes the result into that existing results slot
+--- instead (a pinned pane re-running its own query); `opts.auto` marks the run
+--- as an auto-refresh tick, which leaves the last result and cursor in place.
 --- @param key        string|nil  connection key
 --- @param driver_label string|nil
 --- @param src_bufnr  integer|nil  source buffer number
-function M.set_conn_name(key, driver_label, src_bufnr)
+--- @param opts       { target: string|nil, auto: boolean|nil }|nil
+--- @return string  the results slot the run renders into; pass it to `activate`
+function M.set_conn_name(key, driver_label, src_bufnr, opts)
+  opts = opts or {}
   local display   = key and connections.conn_display_name(key) or nil
   local label     = display and (driver_label and (display .. " (" .. driver_label .. ")") or display)
   local buf_title = (label and (BUFNAME .. " [" .. label .. "]") or BUFNAME)
                     .. src_buf_suffix(src_bufnr)
-  local buf_key   = buf_key_for(src_bufnr, key)
+  local target    = opts.target and state.buffers[opts.target]
+  local buf_key   = (target and target.buffer:is_valid()) and opts.target or buf_key_for(src_bufnr, key)
   local buf_state        = get_or_create_buf_state(buf_key, buf_title)
+  buf_state.auto_running  = opts.auto or false
   buf_state.conn_key      = key
   buf_state.table_path    = nil
   buf_state.column_cache  = nil
@@ -1407,8 +1626,24 @@ function M.set_conn_name(key, driver_label, src_bufnr)
   -- query. `begin_batch` starts a fresh list when this run is a batch too.
   buf_state.segments      = {}
   buf_state.batch_total   = nil
-  buf_state.host          = resolve_host(src_bufnr)
+  -- An auto-refresh keeps the pane's host, which may be in another tab;
+  -- resolving afresh would pick a window in the tab the user is in now.
+  if not (opts.auto and buf_state.host and vim.api.nvim_win_is_valid(buf_state.host)) then
+    buf_state.host = resolve_host(src_bufnr)
+  end
   state.active_src  = buf_key
+  state.active_host = buf_state.host
+  return buf_key
+end
+
+--- Make results slot `key` (from `set_conn_name`) the active one again, so a
+--- response arriving after another query started still renders where its own
+--- query put its loading state. A no-op for nil or a slot that is gone.
+--- @param key string|nil
+function M.activate(key)
+  local buf_state = key and state.buffers[key]
+  if not buf_state then return end
+  state.active_src  = key
   state.active_host = buf_state.host
 end
 
@@ -1600,7 +1835,9 @@ function M.show_results(columns, rows, rows_returned, rows_total, duration_ms, m
   buf_state.rows_total     = rows_total    or buf_state.rows_returned
   buf_state.duration_ms    = duration_ms
   buf_state.messages       = msgs
-  buf_state.page           = 1
+  -- An auto-refresh stays on the page the user is reading, as far as it still exists.
+  local last_page          = math.max(1, math.ceil(#rows / config.options.results.page_size))
+  buf_state.page           = buf_state.auto_running and math.min(buf_state.page, last_page) or 1
   buf_state.histogram      = nil
   buf_state.histogram_req  = buf_state.histogram_req + 1
   ensure_win(buf_state)

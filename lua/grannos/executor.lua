@@ -81,15 +81,18 @@ local update_log_from_result  -- forward declaration; defined below run_batch / 
 --- @param first_line integer|nil  0-indexed first line of the batch in bufnr
 --- @param had_error  boolean      true if any earlier statement already failed
 --- @param values     table<string, string|string[]>|nil  query parameter values
-local function run_batch(queries, conn, idx, bufnr, first_line, had_error, values)
+--- @param target     string|nil   results slot the batch renders into; see results.activate
+--- @param no_log     boolean|nil  true to keep this run out of the query log
+local function run_batch(queries, conn, idx, bufnr, first_line, had_error, values, target, no_log)
   local q           = queries[idx]
   local source_line = (bufnr and first_line ~= nil) and (first_line + q.line) or nil
-  local log_id      = log.add(conn.key, bufnr, source_line, q.sql)
+  local log_id      = not no_log and log.add(conn.key, bufnr, source_line, q.sql) or nil
   local gh          = (bufnr and first_line ~= nil)
       and gutter.show_running(bufnr, first_line + q.line) or nil
   local req_id = execute(conn, q.sql, values, function(err, result)
     vim.schedule(function()
       gutter.unregister_request(gh)
+      results.activate(target)
       if err then
         had_error = true
         results.append_batch_error(idx, #queries, err, q.sql)
@@ -101,7 +104,7 @@ local function run_batch(queries, conn, idx, bufnr, first_line, had_error, value
         update_log_from_result(conn.key, log_id, result, q.sql)
       end
       if idx < #queries then
-        run_batch(queries, conn, idx + 1, bufnr, first_line, had_error, values)
+        run_batch(queries, conn, idx + 1, bufnr, first_line, had_error, values, target, no_log)
       end
     end)
   end)
@@ -144,12 +147,14 @@ end
 --- @param log_id   string
 --- @param end_line integer|nil  0-indexed last line of the query in the source buffer
 --- @param values   table<string, string|string[]>|nil  query parameter values
-local function run_single(conn, sql, gh, conn_key, log_id, end_line, values)
+--- @param target   string|nil  results slot the result renders into; see results.activate
+local function run_single(conn, sql, gh, conn_key, log_id, end_line, values, target)
   results.show_loading("Executing…")
   local req_id = execute(conn, sql, values,
     function(err, result)
       vim.schedule(function()
         gutter.unregister_request(gh)
+        results.activate(target)
         if err then
           results.show_error(err)
           gutter.show_error(gh)
@@ -166,12 +171,16 @@ local function run_single(conn, sql, gh, conn_key, log_id, end_line, values)
           -- on the server". The outer vim.schedule lets this message actually paint
           -- before the (synchronous, blocking) render work below runs.
           results.show_loading("Processing…")
-          vim.schedule(function() dispatch_result(result, sql) end)
+          vim.schedule(function()
+            results.activate(target)
+            dispatch_result(result, sql)
+          end)
         end
       end)
     end,
     function(progress)
       vim.schedule(function()
+        results.activate(target)
         results.show_loading(progress.message or progress.status or "…")
       end)
     end)
@@ -186,13 +195,15 @@ end
 --- @param first_line integer|nil  0-indexed
 --- @param query      string
 --- @param callback   fun(proceed: boolean)
-local function check_confirm_writes(conn, bufnr, first_line, query, callback)
+--- @param unattended boolean|nil  true to refuse, rather than prompt, when a prompt is due
+local function check_confirm_writes(conn, bufnr, first_line, query, callback, unattended)
   local params = connections.get(conn.key) or {}
   if params.allow_writes then callback(true) return end
   if not bufnr or first_line == nil then callback(true) return end
   local nlines   = select(2, query:gsub("\n", ""))
   local has_write = ts_queries.has_write_statement(bufnr, first_line, first_line + nlines)
   if not has_write then callback(true) return end
+  if unattended then callback(false) return end
 
   local choices = { "Abort", "Execute", "Always allow writes" }
   vim.ui.select(choices, { prompt = "Write operation detected:" }, function(choice)
@@ -229,18 +240,27 @@ end
 --- When treesitter is available and multiple statements are found in the buffer
 --- range, they are run as a labelled batch. `{{name}}` / `{{name[]}}` query
 --- parameters are prompted for first and bound into every statement.
+--- `opts.auto` marks an unattended re-run (the results pane's auto-refresh):
+--- it renders into `opts.target`, binds `opts.values` instead of prompting,
+--- stays out of the query log, and calls `opts.on_refused` instead of asking
+--- to confirm a write.
 --- @param conn       ConnSession
 --- @param query      string
 --- @param bufnr      integer|nil       source buffer (for gutter marks and splitting)
 --- @param first_line integer|nil       0-indexed first line of the query in bufnr
-function M.run(conn, query, bufnr, first_line)
+--- @param opts       { target: string|nil, auto: boolean|nil, values: table|nil, on_refused: fun()|nil }|nil
+function M.run(conn, query, bufnr, first_line, opts)
+  opts = opts or {}
   check_confirm_writes(conn, bufnr, first_line, query, function(proceed)
-    if not proceed then return end
-    with_params(conn, query, function(values)
-
-      results.set_conn_name(conn.key, conn.driver_label, bufnr)
+    if not proceed then
+      if opts.on_refused then opts.on_refused() end
+      return
+    end
+    local function go(values)
+      local target = results.set_conn_name(conn.key, conn.driver_label, bufnr,
+        { target = opts.target, auto = opts.auto })
       local ft = (bufnr and vim.api.nvim_buf_is_valid(bufnr)) and vim.bo[bufnr].filetype or ""
-      results.set_query(query, ft, bufnr, first_line)
+      results.set_query(query, ft, bufnr, first_line, values)
 
       local queries
       if bufnr and first_line ~= nil then
@@ -268,17 +288,18 @@ function M.run(conn, query, bufnr, first_line)
         local nlines = select(2, query:gsub("\n", ""))
         gutter.clear_range(bufnr, first_line, first_line + nlines)
         results.begin_batch(#queries)
-        run_batch(queries, conn, 1, bufnr, first_line, false, values)
+        run_batch(queries, conn, 1, bufnr, first_line, false, values, target, opts.auto)
       else
         local sql      = query
-        local log_id   = log.add(conn.key, bufnr, first_line, sql)
+        local log_id   = not opts.auto and log.add(conn.key, bufnr, first_line, sql) or nil
         local gh       = (bufnr and first_line ~= nil) and gutter.show_running(bufnr, first_line) or nil
         local nlines   = select(2, sql:gsub("\n", ""))
         local end_line = (first_line ~= nil) and (first_line + nlines) or nil
-        run_single(conn, sql, gh, conn.key, log_id, end_line, values)
+        run_single(conn, sql, gh, conn.key, log_id, end_line, values, target)
       end
-    end)
-  end)
+    end
+    if opts.auto then go(opts.values) else with_params(conn, query, go) end
+  end, opts.auto)
 end
 
 return M

@@ -89,6 +89,8 @@ require("grannos").setup({
     split     = "below",  -- "below" | "right"
     height    = 15,
     page_size = 500,
+    -- Intervals the results pane's `gr` offers for auto-refresh (off by default).
+    auto_refresh_intervals = { "5s", "10s", "30s", "1m", "5m", "15m", "30m", "1h" },
   },
 })
 ```
@@ -170,6 +172,7 @@ Results appear in a split window with aligned columns and a row count. For DML q
 | `[` / `]` | Previous / next page |
 | `e` | Export the results: pretty, JSON (flattened or structured), CSV or Markdown |
 | `R` | Re-run the query that produced the results |
+| `gr` | Auto-refresh: re-run the query every X (a listed interval or a custom one like `45s`); off by default. The last result, cursor and page stay on screen while each refresh runs, refreshes skip the query log, and it stops when the pane closes |
 | `p` | Open the session parameters for the results' connection (e.g. the time range) |
 | `P` | Pin the pane: keep its results and show the next query's result beside it |
 | `q` | Close the results window |
