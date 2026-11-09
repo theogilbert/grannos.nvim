@@ -147,3 +147,49 @@ describe(":DbAttach picker", function()
     assert.equals("    prod  (Postgres)", list_lines()[1])
   end)
 end)
+
+describe(":DbAttach <name>", function()
+  local tmp
+  local errors
+
+  before_each(function()
+    require("grannos.hl").setup()
+    tmp = vim.fn.tempname() .. ".json"
+    config.setup({ connections_file = tmp })
+    local f = assert(io.open(tmp, "w"))
+    f:write(vim.json.encode({
+      srv = { pg = { label = "Postgres", groups = { [""] = { prod = { host = "b" } } } } },
+    }))
+    f:close()
+    connections.invalidate()
+    live, snapshot, waiting, landed, connects = caps_for("srv"), nil, {}, false, {}
+    errors = {}
+    vim.notify = function(msg, level)
+      if level == vim.log.levels.ERROR then table.insert(errors, msg) end
+    end
+    vim.cmd("enew")
+  end)
+
+  after_each(function()
+    for _, k in ipairs(db.active_keys()) do db.disconnect(k) end
+    pcall(vim.fn.delete, tmp)
+  end)
+
+  it("finds the name once a backend just started reports its server", function()
+    db.attach("prod")
+    assert.same({}, errors)
+    assert.equals(0, #connects)
+
+    land()
+    assert.same({}, errors)
+    assert.equals(1, #connects)
+    assert.equals("b", connects[1].host)
+  end)
+
+  it("reports a name the server has no connection for", function()
+    db.attach("nope")
+    land()
+    assert.same({ 'grannos: connection "nope" not found' }, errors)
+    assert.equals(0, #connects)
+  end)
+end)

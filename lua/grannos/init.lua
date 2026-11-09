@@ -239,19 +239,17 @@ function M.attach(name)
   end
 
   if name and name ~= "" then
-    local params = connections.get(name)
-    local resolved_key = name
-    if not params then
-      -- Search the active server's connections by display name (:DbAttach <name>).
-      local active_caps = client.capabilities()
-      local err
-      resolved_key, params, err = connections.find(active_caps and (active_caps.server or "") or "", name)
-      if not resolved_key then
-        vim.notify(("grannos: connection %q %s"):format(name, err), vim.log.levels.ERROR)
-        return
-      end
-    end
     M.ensure_backend_with_caps(function(caps)
+      -- A display name (:DbAttach <name>) is searched among the connections of
+      -- the server the backend reports, so only once it has reported one.
+      local resolved_key, params, err = name, connections.get(name), nil
+      if not params then
+        resolved_key, params, err = connections.find(caps.server or "", name)
+        if not resolved_key then
+          vim.notify(("grannos: connection %q %s"):format(name, err), vim.log.levels.ERROR)
+          return
+        end
+      end
       local _, driver = connections.conn_parts(resolved_key)
       connections.prompt_password(caps, driver, params, function(params_with_pw)
         if not params_with_pw then return end
