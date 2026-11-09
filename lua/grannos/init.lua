@@ -109,17 +109,6 @@ local function conn_display_label(key)
   return text
 end
 
---- Append an empty line to `bufnr` unless it already ends with one, so the
---- last line of content can always be scrolled above the "Connected to …"
---- label pinned to the window's bottom row.
---- @param bufnr integer
-local function ensure_trailing_blank(bufnr)
-  if not vim.api.nvim_buf_is_valid(bufnr) or not vim.bo[bufnr].modifiable then return end
-  local last = vim.api.nvim_buf_get_lines(bufnr, -2, -1, false)[1]
-  if last == nil or last == "" then return end
-  vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, { "" })
-end
-
 --- Redraw the "Connected to …" label of every window showing a buffer
 --- attached to `key` (after the label's text changed).
 --- @param key string  composite connection key
@@ -147,7 +136,6 @@ local function set_buf_conn(bufnr, name, opts)
   end
   local keys = config.options.keymaps
   if name then
-    ensure_trailing_blank(bufnr)
     vim.keymap.set("n", keys.hover_key, function() M.describe_symbol_at_cursor() end,
       { buffer = bufnr, desc = "Describe symbol under cursor" })
     vim.keymap.set("n", keys.query_info_key, function() M.show_query_info() end,

@@ -111,11 +111,10 @@ describe("connection label", function()
 
   after_each(close_all)
 
-  --- Text of the "Connected to …" label float, if any.
+  --- Text of the "Connected to …" label in the current window, if any.
   --- @return string|nil
   local function label_text()
-    local w = float_win()
-    return w and vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(w), 0, 1, false)[1]
+    return require("grannos.ui.conn_label").text(vim.api.nvim_get_current_win())
   end
 
   it("shows the connection's session values in parentheses", function()
@@ -126,13 +125,36 @@ describe("connection label", function()
     assert.equals("Connected to metrics (Prometheus) (query_mode=instant)", label_text())
   end)
 
-  it("appends an empty last line to a buffer it attaches, once", function()
+  it("shows in the winbar, leaving the buffer unmodified", function()
     local buf = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "up" })
+    vim.bo[buf].modified = false
+    vim.api.nvim_win_set_buf(0, buf)
     grannos.set_buf_conn(buf, KEY)
-    assert.same({ "up", "" }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
+    assert.same({ "up" }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
+    assert.is_false(vim.bo[buf].modified)
+    assert.truthy(vim.wo.winbar:find("Connected to metrics", 1, true))
+  end)
 
+  it("gives the window back its own winbar when the buffer is detached", function()
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_win_set_buf(0, buf)
+    vim.wo.winbar = "mine"
     grannos.set_buf_conn(buf, KEY)
-    assert.same({ "up", "" }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
+    assert.are_not.equal("mine", vim.wo.winbar)
+    grannos.set_buf_conn(buf, nil)
+    assert.equals("mine", vim.wo.winbar)
+    vim.wo.winbar = ""
+  end)
+
+  it("does not carry over into a split showing another buffer", function()
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_win_set_buf(0, buf)
+    grannos.set_buf_conn(buf, KEY)
+    vim.cmd("split")
+    assert.truthy(vim.wo.winbar:find("Connected to", 1, true))
+    vim.cmd("enew")
+    assert.equals("", vim.wo.winbar)
+    vim.cmd("close")
   end)
 end)
