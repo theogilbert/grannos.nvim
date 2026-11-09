@@ -18,6 +18,7 @@ local session_params    = require("grannos.session_params")
 local hover             = require("grannos.ui.hover")
 local builtins          = require("grannos.builtins")
 local symbol_busy       = require("grannos.ui.symbol_busy")
+local statement_hl      = require("grannos.ui.statement_hl")
 
 local FLASH_NS = vim.api.nvim_create_namespace("GrannosFlash")
 
@@ -76,6 +77,20 @@ end
 --- @return table  exposes statements_in_range and statement_at_cursor
 local function statement_splitter(bufnr)
   return devtools.applies(conn_for_buf(bufnr)) and devtools or ts_queries
+end
+
+--- Return what `execute` runs from the cursor without a selection: the statement
+--- there, else the current line (treesitter unavailable, or the cursor outside
+--- every statement); nil when that line is blank. `bufnr` must be current.
+--- @param bufnr integer
+--- @return SqlStatement|nil
+local function execution_target(bufnr)
+  local stmt = statement_splitter(bufnr).statement_at_cursor(bufnr)
+  if stmt then return stmt end
+  local row  = vim.api.nvim_win_get_cursor(0)[1] - 1
+  local line = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1] or ""
+  if vim.trim(line) == "" then return nil end
+  return { text = line, start_row = row, start_col = 0, end_row = row, end_col = #line }
 end
 
 --- Return the human-readable label "display_name (Driver Label) (key=value, …)"
@@ -140,11 +155,13 @@ local function set_buf_conn(bufnr, name, opts)
     vim.keymap.set("n", keys.goto_symbol_key, function() M.goto_symbol_at_cursor() end,
       { buffer = bufnr, desc = "Reveal symbol under cursor in the explorer" })
     require("grannos.completion").attach(bufnr, name)
+    if config.options.statement_highlight then statement_hl.attach(bufnr, execution_target) end
   else
     pcall(vim.keymap.del, "n", keys.hover_key, { buffer = bufnr })
     pcall(vim.keymap.del, "n", keys.query_info_key, { buffer = bufnr })
     pcall(vim.keymap.del, "n", keys.goto_symbol_key, { buffer = bufnr })
     require("grannos.completion").detach(bufnr)
+    statement_hl.detach(bufnr)
   end
 end
 
@@ -573,21 +590,13 @@ function M.execute()
     end
     execute_sql(sql, bufnr, sr)
   else
-    -- No selection: use treesitter to find the outermost statement at cursor.
-    local ts_stmt = statement_splitter(bufnr).statement_at_cursor(bufnr)
-    if ts_stmt then
-      flash_range(bufnr, ts_stmt.start_row, ts_stmt.start_col, ts_stmt.end_row, ts_stmt.end_col)
-      execute_sql(ts_stmt.text, bufnr, ts_stmt.start_row)
-      return
-    end
-
-    -- Treesitter unavailable — fall back to the current line.
-    local sql = vim.api.nvim_get_current_line()
-    if vim.trim(sql) == "" then
+    local target = execution_target(bufnr)
+    if not target then
       vim.notify("grannos: current line is empty", vim.log.levels.WARN)
       return
     end
-    execute_sql(sql, bufnr, vim.api.nvim_win_get_cursor(0)[1] - 1)
+    flash_range(bufnr, target.start_row, target.start_col, target.end_row, target.end_col)
+    execute_sql(target.text, bufnr, target.start_row)
   end
 end
 

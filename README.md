@@ -72,6 +72,10 @@ require("grannos").setup({
   -- comment in its first or last 5 lines when it is opened.
   auto_attach = true,
 
+  -- In connected query buffers, highlight (GrannosStatementCursor, linked to
+  -- CursorLine) what `execute` would run from the cursor in normal mode.
+  statement_highlight = true,
+
   keymaps = {
     -- Describe the symbol (or panel item) under the cursor. In the connections
     -- panel this shows the connection details / error float.

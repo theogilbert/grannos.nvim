@@ -31,6 +31,10 @@ M.defaults = {
   --   -- grannos: connection=group/name
   auto_attach = true,
 
+  -- In connected query buffers, highlight (GrannosStatementCursor) what
+  -- `execute` would run from the cursor in normal mode.
+  statement_highlight = true,
+
   keymaps = {
     -- Describe the symbol (or panel item) under the cursor.
     hover_key = "K",

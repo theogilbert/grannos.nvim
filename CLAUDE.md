@@ -37,6 +37,7 @@ grannos.nvim is a Neovim database-client plugin that delegates all database work
 | `lua/grannos/ui/results.lua` | Query results panel: a split docked below (or right of) the query window it serves, one per query window |
 | `lua/grannos/ui/spinner.lua` | Refcounted braille spinner driven by a libuv timer |
 | `lua/grannos/ui/gutter.lua` | Gutter extmarks: running/success/error icons |
+| `lua/grannos/ui/statement_hl.lua` | Highlights what `execute` would run from the cursor, in connected buffers in normal mode |
 | `lua/grannos/ui/conn_label.lua` | Winbar connection label per window |
 | `lua/grannos/ui/query_log.lua` | 4-pane query history float |
 | `lua/grannos/ui/conn_picker.lua` | Single-pane search-and-list float over caller-supplied rows; `connections.pick` builds the saved-connection rows for `:DbAttach` |

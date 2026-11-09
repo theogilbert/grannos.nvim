@@ -955,6 +955,7 @@ All keys are optional.
     connections_file = nil,   -- auto-detected from $XDG_CONFIG_HOME
     queries_dir      = nil,   -- auto-detected from $XDG_DATA_HOME
     auto_attach      = true,
+    statement_highlight = true,
     keymaps = {
       hover_key       = "K",
       query_info_key  = "gK",
@@ -1034,6 +1035,16 @@ auto_attach ~
 
   Associate a file with the connection its `grannos: connection=…`
   directive comment names when it is opened. See |grannos-auto-attach|.
+
+                                              *grannos-statement_highlight*
+statement_highlight ~
+  Type: `boolean`   Default: `true`
+
+  In connected query buffers, highlight what `execute` would run from the
+  cursor in normal mode: the statement there, else the current line unless it
+  is blank. Visual and insert mode show nothing, nor does a window the cursor
+  has left. The group is `GrannosStatementCursor`, linked to |hl-CursorLine|
+  by default.
 
                                                     *grannos-hover-key*
 keymaps.hover_key ~
