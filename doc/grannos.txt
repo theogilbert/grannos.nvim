@@ -1043,8 +1043,9 @@ statement_highlight ~
   In connected query buffers, highlight what `execute` would run from the
   cursor in normal mode: the statement there, else the current line unless it
   is blank. Visual and insert mode show nothing, nor does a window the cursor
-  has left. The group is `GrannosStatementCursor`, linked to |hl-CursorLine|
-  by default.
+  has left. The group is `GrannosStatementCursor`; by default its background
+  is |hl-Normal|'s with a faint green tint, recomputed on each colorscheme
+  change (or a link to |hl-CursorLine| when |hl-Normal| has no background).
 
                                                     *grannos-hover-key*
 keymaps.hover_key ~

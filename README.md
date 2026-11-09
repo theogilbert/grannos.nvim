@@ -72,8 +72,8 @@ require("grannos").setup({
   -- comment in its first or last 5 lines when it is opened.
   auto_attach = true,
 
-  -- In connected query buffers, highlight (GrannosStatementCursor, linked to
-  -- CursorLine) what `execute` would run from the cursor in normal mode.
+  -- In connected query buffers, highlight (GrannosStatementCursor, Normal's
+  -- background with a faint green tint) what `execute` would run from the cursor.
   statement_highlight = true,
 
   keymaps = {

@@ -90,6 +90,37 @@ local function build_highlights()
   return highlights
 end
 
+-- GrannosStatementCursor's background is Normal's tinted this far towards
+-- STATEMENT_TINT (the success green): enough to see the statement, faint
+-- enough not to compete with the cursor line.
+local STATEMENT_TINT  = 0x98C379
+local STATEMENT_BLEND = 0.1
+
+--- Return the colour `t` of the way from `a` to `b` (24-bit RGB integers).
+--- @param a integer
+--- @param b integer
+--- @param t number  0 = a, 1 = b
+--- @return integer
+local function blend(a, b, t)
+  local out = 0
+  for shift = 16, 0, -8 do
+    local ca = bit.band(bit.rshift(a, shift), 0xFF)
+    local cb = bit.band(bit.rshift(b, shift), 0xFF)
+    out = out + bit.lshift(math.floor(ca + (cb - ca) * t + 0.5), shift)
+  end
+  return out
+end
+
+--- Return the definition of GrannosStatementCursor: Normal's background with
+--- a green tint, or a link to CursorLine when Normal has no background (a
+--- transparent one, where there is nothing to tint).
+--- @return table
+local function statement_cursor_hl()
+  local normal = vim.api.nvim_get_hl(0, { name = "Normal", link = false })
+  if not normal.bg then return { link = "CursorLine", default = true } end
+  return { bg = blend(normal.bg, STATEMENT_TINT, STATEMENT_BLEND), default = true }
+end
+
 --- Create namespaces and define all highlight groups; re-called on ColorScheme.
 local function setup_highlights()
   M.NS_ID            = vim.api.nvim_create_namespace("GrannosNs")
@@ -104,7 +135,7 @@ local function setup_highlights()
   vim.api.nvim_set_hl(0, "GrannosQuerySuccess",        { fg = "#98C379",  default = true })
   vim.api.nvim_set_hl(0, "GrannosQueryError",          { fg = "#CA2722",  default = true })
   vim.api.nvim_set_hl(0, "GrannosQueryFlash",          { link = "Visual", default = true })
-  vim.api.nvim_set_hl(0, "GrannosStatementCursor",     { link = "CursorLine", default = true })
+  vim.api.nvim_set_hl(0, "GrannosStatementCursor",     statement_cursor_hl())
   vim.api.nvim_set_hl(0, "GrannosCompletionFetch",    { link = "Comment", default = true })
   vim.api.nvim_set_hl(0, "GrannosExplorerDatabase",    { fg = "#98C379",  default = true })
   vim.api.nvim_set_hl(0, "GrannosExplorerSchema",      { fg = "#E5C07B",  default = true })
