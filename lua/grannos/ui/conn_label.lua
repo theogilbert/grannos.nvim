@@ -1,15 +1,26 @@
 -- A "Connected to <name>" label, right-aligned in the winbar of each window
--- whose buffer has an associated connection. Being a row of its own, it never
--- covers the buffer's text. The labels disappear when the association or the
+-- whose buffer has an associated connection — or "Disconnected from <name>
+-- (idle timeout)" once the backend closed it for inactivity (the next request
+-- reconnects it). Being a row of its own, it never covers the buffer's text. The labels disappear when the association or the
 -- window goes away, giving the window back the winbar it had before.
 local M = {}
 
 -- Every label starts with this, which is how a winbar is recognised as ours —
--- including one a split copied from a labelled window.
-local PREFIX = "%=%#GrannosConnection#Connected to "
+-- including one a split copied from a labelled window. It covers both the
+-- GrannosConnection and GrannosConnectionIdle highlight groups.
+local PREFIX = "%=%#GrannosConnection"
 
-local labels  = {}                       -- [winid] -> { name = s, prev = winbar before the label }
-local resolve = function() return nil end -- bufnr -> connection name | nil
+local labels  = {}                       -- [winid] -> { name = s, idle = b, prev = winbar before the label }
+local resolve = function() return nil end -- bufnr -> connection name | nil, idle
+
+--- The label's visible text.
+--- @param name string
+--- @param idle boolean|nil
+--- @return string
+local function label_text(name, idle)
+  if idle then return "Disconnected from " .. name .. " (idle timeout)" end
+  return "Connected to " .. name
+end
 
 --- Return the window-local 'winbar' of `winid`.
 --- @param winid integer
@@ -48,15 +59,17 @@ end
 
 --- Show (replacing any existing) the connection label for `winid`.
 --- @param winid integer
---- @param name  string  human-readable connection name
-function M.show(winid, name)
+--- @param name  string        human-readable connection name
+--- @param idle  boolean|nil   true when the backend closed the connection for inactivity
+function M.show(winid, name, idle)
   -- What to restore: the winbar now, unless that is a label (ours, or one a
   -- split copied), in which case what this window had before it, else the global.
   local entry = labels[winid]
   local prev  = get_winbar(winid)
   if is_label(prev) then prev = entry and entry.prev or vim.go.winbar end
-  set_winbar(winid, PREFIX .. name:gsub("%%", "%%%%"))
-  labels[winid] = { name = name, prev = prev }
+  local hl = idle and "Idle#" or "#"
+  set_winbar(winid, PREFIX .. hl .. label_text(name, idle):gsub("%%", "%%%%"))
+  labels[winid] = { name = name, idle = idle or nil, prev = prev }
 end
 
 --- Return the label text shown in `winid`, or nil when it has none.
@@ -64,7 +77,7 @@ end
 --- @return string|nil
 function M.text(winid)
   local entry = labels[winid]
-  return entry and ("Connected to " .. entry.name)
+  return entry and label_text(entry.name, entry.idle)
 end
 
 --- Show or remove the label for `winid` based on its current buffer's connection.
@@ -73,10 +86,13 @@ local function refresh(winid)
   if not vim.api.nvim_win_is_valid(winid) then return end
   -- Skip floating windows.
   if vim.api.nvim_win_get_config(winid).relative ~= "" then return end
-  local name = resolve(vim.api.nvim_win_get_buf(winid))
+  local name, idle = resolve(vim.api.nvim_win_get_buf(winid))
+  idle = idle or nil
   if name then
     local entry = labels[winid]
-    if not (entry and entry.name == name and is_label(get_winbar(winid))) then M.show(winid, name) end
+    if not (entry and entry.name == name and entry.idle == idle and is_label(get_winbar(winid))) then
+      M.show(winid, name, idle)
+    end
   else
     M.hide(winid)
   end
@@ -89,7 +105,8 @@ function M.clear_all()
 end
 
 --- Install the autocmds that keep labels in sync and set the buffer→name resolver.
---- @param resolve_fn fun(bufnr: integer): string|nil  returns the connection name or nil
+--- @param resolve_fn fun(bufnr: integer): string|nil, boolean|nil  returns the connection name (or nil)
+---                    and whether the backend closed it for inactivity
 function M.setup(resolve_fn)
   resolve = resolve_fn
   local aug = vim.api.nvim_create_augroup("GrannosConnLabels", { clear = true })

@@ -130,6 +130,7 @@ local function setup_highlights()
   end
   -- Defined globally so it works in any buffer's extmarks; default = true allows user override.
   vim.api.nvim_set_hl(0, "GrannosConnection",          { fg = CONN_FG,    italic = true, default = true })
+  vim.api.nvim_set_hl(0, "GrannosConnectionIdle",      { link = "DiagnosticWarn", default = true })
   vim.api.nvim_set_hl(0, "GrannosConnError",           { fg = ERROR_FG,   default = true })
   vim.api.nvim_set_hl(0, "GrannosQueryRunning",        { fg = "#E5C07B",  default = true })
   vim.api.nvim_set_hl(0, "GrannosQuerySuccess",        { fg = "#98C379",  default = true })

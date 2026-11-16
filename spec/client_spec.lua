@@ -77,3 +77,27 @@ describe("client.capabilities_snapshot", function()
     assert.is_nil(client.capabilities_snapshot("other-cmd"))
   end)
 end)
+
+describe("client events", function()
+  it("routes an unsolicited event to the event handler", function()
+    local got
+    client.set_event_handler(function(event, params) got = { event, params } end)
+    client._dispatch({ event = "idle_timeout", params = { connection_id = "0", idle_timeout = 600 } })
+    client.set_event_handler(nil)
+    assert.are.same({ "idle_timeout", { connection_id = "0", idle_timeout = 600 } }, got)
+  end)
+
+  it("reports a successful request on a connection to the ok handler", function()
+    local oks = {}
+    client.set_ok_handler(function(conn_id) table.insert(oks, conn_id) end)
+    client.start("cat")
+    local done = 0
+    -- `cat` echoes the request back: no error field, so it reads as a success.
+    client.request("execute", { connection_id = "3", query = "x" }, function() done = done + 1 end)
+    client.request("capabilities", {}, function() done = done + 1 end)
+    vim.wait(5000, function() return done >= 2 end, 20)
+    client.stop()
+    client.set_ok_handler(nil)
+    assert.are.same({ "3" }, oks)
+  end)
+end)

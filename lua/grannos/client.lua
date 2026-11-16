@@ -12,6 +12,8 @@ local state = {
   pending      = {},  -- id → callback(err, result)
   line_parts   = {},  -- chunks of the partial line accumulated across on_stdout calls
   exit_handler = nil, -- fun(code: integer)|nil, called whenever the process exits
+  event_handler = nil, -- fun(event: string, params: table)|nil, called for unsolicited server events
+  ok_handler   = nil, -- fun(conn_id: any)|nil, called when a request on a connection succeeds
   cmd          = nil, -- the command the running backend was started with
 }
 
@@ -27,7 +29,7 @@ M.caps_file = nil
 -- PROTOCOL_VERSION for breaking changes; bump minor for additive changes.
 -- Only major is checked for compatibility — a minor bump is guaranteed
 -- backward-compatible by convention.
-local PROTOCOL_VERSION = "1.1"
+local PROTOCOL_VERSION = "1.2"
 M.PROTOCOL_VERSION = PROTOCOL_VERSION
 
 
@@ -84,8 +86,12 @@ end
 --- Progress messages invoke on_progress without resolving the pending entry.
 --- @param msg table  decoded JSON message from the server
 function M._dispatch(msg)
+  if type(msg.event) == "string" then
+    if state.event_handler then state.event_handler(msg.event, strip_nil(msg.params) or {}) end
+    return
+  end
   local id = msg.id
-  if id == nil then return end
+  if id == nil or id == vim.NIL then return end
   local entry = state.pending[id]
   if not entry then return end
   if msg.progress then
@@ -97,8 +103,22 @@ function M._dispatch(msg)
   if err and err ~= vim.NIL then
     entry.cb(err, nil)
   else
+    if entry.conn_id ~= nil and state.ok_handler then state.ok_handler(entry.conn_id) end
     entry.cb(nil, strip_nil(msg.result))
   end
+end
+
+--- Set the handler for unsolicited server events (e.g. `idle_timeout`).
+--- @param fn fun(event: string, params: table)|nil
+function M.set_event_handler(fn)
+  state.event_handler = fn
+end
+
+--- Set the handler called whenever a request carrying a `connection_id` succeeds
+--- — proof the backend holds that connection open (again).
+--- @param fn fun(conn_id: any)|nil
+function M.set_ok_handler(fn)
+  state.ok_handler = fn
 end
 
 
@@ -115,7 +135,7 @@ function M.request(method, params, callback, on_progress)
   end
   local id      = state.next_id
   state.next_id = id + 1
-  state.pending[id] = { cb = callback, progress = on_progress }
+  state.pending[id] = { cb = callback, progress = on_progress, conn_id = params and params.connection_id }
   local p = (params == nil or vim.tbl_isempty(params)) and vim.empty_dict() or params
   local line = vim.json.encode({ id = id, method = method, params = p }) .. "\n"
   vim.fn.chansend(state.job_id, line)

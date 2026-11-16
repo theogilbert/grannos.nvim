@@ -114,11 +114,41 @@ end
 --- @param key string  composite connection key
 local function refresh_conn_labels(key)
   local text = conn_display_label(key)
+  local idle = state.conns[key] and state.conns[key].idle_closed
   for bufnr, name in pairs(state.buf_conns) do
     if name == key and not state.silent_bufs[bufnr] then
-      for _, winid in ipairs(vim.fn.win_findbuf(bufnr)) do conn_label.show(winid, text) end
+      for _, winid in ipairs(vim.fn.win_findbuf(bufnr)) do conn_label.show(winid, text, idle) end
     end
   end
+end
+
+--- Return the key of the open connection the backend knows as `conn_id`.
+--- @param conn_id any
+--- @return string|nil
+local function key_for_conn_id(conn_id)
+  for key, conn in pairs(state.conns) do
+    if tostring(conn.conn_id) == tostring(conn_id) then return key end
+  end
+end
+
+--- Flag (or unflag) a connection as closed by the backend's idle timeout and
+--- redraw its labels. The backend keeps the connection id and reconnects on
+--- the next request, so a successful request clears the flag again.
+--- @param conn_id any
+--- @param idle    boolean
+local function set_idle_closed(conn_id, idle)
+  local key  = key_for_conn_id(conn_id)
+  local conn = key and state.conns[key]
+  if not conn or (conn.idle_closed or false) == idle then return end
+  conn.idle_closed = idle or nil
+  refresh_conn_labels(key)
+end
+
+--- Handle an unsolicited backend event.
+--- @param event  string
+--- @param params table
+local function on_backend_event(event, params)
+  if event == "idle_timeout" then set_idle_closed(params.connection_id, true) end
 end
 
 --- Associate (or, with name=nil, dissociate) a buffer with a connection and update winbar labels.
@@ -132,7 +162,11 @@ local function set_buf_conn(bufnr, name, opts)
   state.silent_bufs[bufnr] = (opts and opts.silent) or nil
   if state.silent_bufs[bufnr] then return end
   for _, winid in ipairs(vim.fn.win_findbuf(bufnr)) do
-    if name then conn_label.show(winid, conn_display_label(name)) else conn_label.hide(winid) end
+    if name then
+      conn_label.show(winid, conn_display_label(name), state.conns[name] and state.conns[name].idle_closed)
+    else
+      conn_label.hide(winid)
+    end
   end
   local keys = config.options.keymaps
   if name then
@@ -161,6 +195,11 @@ function M.set_buf_conn(bufnr, conn_key, opts)
   set_buf_conn(bufnr, conn_key, opts)
 end
 
+-- Exposed for tests: what the client hands an unsolicited backend event, and
+-- a successful request on a connection.
+M._on_backend_event = on_backend_event
+function M._on_conn_ok(conn_id) set_idle_closed(conn_id, false) end
+
 --- Initialise config, highlights, gutter, and the connection-label autocmds.
 --- @param opts table|nil
 function M.setup(opts)
@@ -171,7 +210,8 @@ function M.setup(opts)
   conn_label.setup(function(bufnr)
     if state.silent_bufs[bufnr] then return nil end
     local name = state.buf_conns[bufnr]
-    return name and conn_display_label(name)
+    if not name then return nil end
+    return conn_display_label(name), state.conns[name] and state.conns[name].idle_closed
   end)
   if config.options.auto_attach then
     vim.api.nvim_create_autocmd("BufReadPost", {
@@ -206,6 +246,8 @@ local on_backend_exit
 local function start_backend()
   if client.is_running() then return true end
   client.set_exit_handler(on_backend_exit)
+  client.set_event_handler(on_backend_event)
+  client.set_ok_handler(function(conn_id) set_idle_closed(conn_id, false) end)
   local ok, err = pcall(client.start, config.options.server_cmd)
   if not ok then
     vim.notify("grannos: " .. tostring(err), vim.log.levels.ERROR)

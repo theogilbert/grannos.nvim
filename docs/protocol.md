@@ -77,6 +77,32 @@ Methods that currently support progress: `execute`.
 
 ---
 
+## Events
+
+The server may also send unsolicited messages that answer no request. An event has no `id`; it carries an `event` name and a `params` object instead. Clients should ignore events they do not recognise. (Added in protocol `1.2`.)
+
+### Event message (server → client)
+
+| Field    | Type   | Description              |
+|----------|--------|--------------------------|
+| `event`  | string | Event name (see below)   |
+| `params` | object | Event-specific payload   |
+
+### `idle_timeout`
+
+Sent when a connection's `idle_timeout` elapsed and the server closed its underlying database connection. The `connection_id` stays valid: the next request on it reconnects transparently (reporting a `reconnecting` progress where supported).
+
+| Field           | Type   | Description                                  |
+|-----------------|--------|----------------------------------------------|
+| `connection_id` | string | The connection that was closed               |
+| `idle_timeout`  | number | The timeout, in seconds, that elapsed        |
+
+```
+server → {"event":"idle_timeout","params":{"connection_id":"0","idle_timeout":600}}
+```
+
+---
+
 ## Methods
 
 ### `capabilities`
@@ -105,7 +131,7 @@ Only drivers whose dependencies are installed appear in the response.
   "id": 1,
   "result": {
     "server": "grannos",
-    "protocol_version": "1.1",
+    "protocol_version": "1.2",
     "drivers": [
       {
         "driver": "mydriver",
