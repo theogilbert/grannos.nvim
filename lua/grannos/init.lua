@@ -666,7 +666,6 @@ function M.open_driver_help(driver, opts)
     end
     local buf = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(result.content, "\n"))
-    vim.bo[buf].filetype   = "markdown"
     vim.bo[buf].modifiable = false
     local win
     if opts.position == "bottom" then
@@ -689,6 +688,9 @@ function M.open_driver_help(driver, opts)
         title_pos  = "center",
       })
     end
+    -- Set once the buffer is in its window: FileType handlers (markdown
+    -- plugins) commonly act on the current window, which is only this one now.
+    vim.bo[buf].filetype = "markdown"
     vim.keymap.set("n", "q",     function() vim.api.nvim_win_close(win, true) end, { buffer = buf, nowait = true })
     vim.keymap.set("n", "<Esc>", function() vim.api.nvim_win_close(win, true) end, { buffer = buf, nowait = true })
   end)
