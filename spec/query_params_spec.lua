@@ -99,6 +99,27 @@ describe("query_params.declarations", function()
   end)
 end)
 
+describe("query_params.placeholder_at", function()
+  it("finds the placeholder spanning the column, 0-indexed", function()
+    local line = "WHERE a = {{a}} AND b IN ({{bs[]}})"
+    assert.are.same({ name = "a", list = false, s = 10, e = 15 }, query_params.placeholder_at(line, 10))
+    assert.are.same({ name = "bs", list = true, s = 26, e = 34 }, query_params.placeholder_at(line, 33))
+    assert.is_nil(query_params.placeholder_at(line, 15))
+  end)
+end)
+
+describe("query_params.hover_lines", function()
+  it("shows the declaration and the last value", function()
+    local lines = query_params.hover_lines("xs", true, { description = "ids", choices = { "a", "b" } }, { "a", "b" })
+    assert.are.same({ "{{xs[]}}  list parameter", "ids", "choices: a | b", "last value: a, b" }, lines)
+  end)
+
+  it("says when it will be asked for, with nothing else to show", function()
+    local lines = query_params.hover_lines("n", false, nil, nil)
+    assert.are.same({ "{{n}}  query parameter", "prompted for when the query runs" }, lines)
+  end)
+end)
+
 describe("query_params.prompt", function()
   local form = require("grannos.ui.conn_form")
   local orig

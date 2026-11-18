@@ -154,6 +154,60 @@ function M.declarations(text)
   return decls
 end
 
+--- Return the placeholder `line` has under byte column `col` (0-indexed), or
+--- nil. Textual, so it finds one in a declaration comment too.
+--- @param line string
+--- @param col  integer
+--- @return { name: string, list: boolean, s: integer, e: integer }|nil  s/e are 0-indexed, e exclusive
+function M.placeholder_at(line, col)
+  local init = 1
+  while true do
+    local s, e, name, brackets = line:find(PLACEHOLDER, init)
+    if not s then return nil end
+    if col >= s - 1 and col < e and (brackets == "" or brackets == "[]") then
+      return { name = name, list = brackets == "[]", s = s - 1, e = e }
+    end
+    init = e + 1
+  end
+end
+
+--- Return the value last submitted for `name` on `conn_key`, or nil.
+--- @param conn_key string
+--- @param name     string
+--- @return string|string[]|nil
+function M.last_value(conn_key, name)
+  return (last_values[conn_key] or {})[name]
+end
+
+--- Lay out the hover for placeholder `name`: its kind, its declaration and
+--- the value it last ran with on the buffer's connection.
+--- @param name string
+--- @param list boolean
+--- @param decl ParamDeclaration|nil
+--- @param last string|string[]|nil
+--- @return string[] lines
+--- @return { [1]: string, [2]: integer, [3]: integer, [4]: integer }[] hls  group, row, col_start, col_end
+function M.hover_lines(name, list, decl, last)
+  decl = decl or {}
+  local head = ("{{%s%s}}"):format(name, list and "[]" or "")
+  local lines = { head .. "  " .. (list and "list parameter" or "query parameter") }
+  local hls = { { "Title", 0, 0, #head }, { "Comment", 0, #head, -1 } }
+  if decl.description then lines[#lines + 1] = decl.description end
+  if decl.choices then
+    lines[#lines + 1] = "choices: " .. table.concat(decl.choices, " | ")
+    hls[#hls + 1] = { "Comment", #lines - 1, 0, 8 }
+  end
+  if last ~= nil then
+    local shown = type(last) == "table" and table.concat(last, ", ") or last
+    lines[#lines + 1] = "last value: " .. (shown == "" and "(empty)" or shown)
+    hls[#hls + 1] = { "Comment", #lines - 1, 0, 11 }
+  elseif not decl.description and not decl.choices then
+    lines[#lines + 1] = "prompted for when the query runs"
+    hls[#hls + 1] = { "Comment", #lines - 1, 0, -1 }
+  end
+  return lines, hls
+end
+
 --- Whether `driver` takes query parameters.
 --- @param driver string
 --- @return boolean

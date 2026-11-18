@@ -310,6 +310,10 @@ the first choice, with an "other…" entry for free text. A list with choices
 becomes a checklist: <Space> ticks an item, <CR> keeps the ticked ones, and
 its "edit as text…" row opens the multi-line editor instead.
 
+The hover key (|grannos-hover-key|) on a placeholder, in the query or in its
+declaration, shows its description, its choices and the value it last ran
+with on the buffer's connection.
+
 In the form, <CR> edits the field under the cursor and <C-s> runs the query
 (q/<Esc> cancels it). A list field opens a multi-line editor: type one item
 per line, then <C-s> to keep the text, or <Esc> in normal mode to discard

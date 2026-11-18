@@ -16,6 +16,7 @@ local symbols           = require("grannos.symbols")
 local log               = require("grannos.log")
 local session_params    = require("grannos.session_params")
 local hover             = require("grannos.ui.hover")
+local query_params      = require("grannos.query_params")
 local builtins          = require("grannos.builtins")
 local symbol_busy       = require("grannos.ui.symbol_busy")
 local statement_hl      = require("grannos.ui.statement_hl")
@@ -1007,6 +1008,22 @@ end
 --- reachable from every column of the statement including this one.
 function M.describe_symbol_at_cursor()
   local bufnr = vim.api.nvim_get_current_buf()
+
+  -- A query parameter is described from the buffer alone: its declaration
+  -- comment and the value it last ran with.
+  local conn = state.conns[state.buf_conns[bufnr] or ""]
+  if conn and query_params.supports(conn.driver) then
+    local row, col = unpack(vim.api.nvim_win_get_cursor(0))
+    local line = vim.api.nvim_buf_get_lines(bufnr, row - 1, row, false)[1] or ""
+    local ph = query_params.placeholder_at(line, col)
+    if ph then
+      local text  = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
+      local decl  = query_params.declarations(text)[ph.name]
+      local lines, hls = query_params.hover_lines(ph.name, ph.list, decl, query_params.last_value(conn.key, ph.name))
+      hover.open(lines, bufnr, { hls = hls })
+      return
+    end
+  end
 
   -- A built-in function needs no connection to be described: its docstring
   -- comes from the language, not the database.
