@@ -179,6 +179,68 @@ function M.last_value(conn_key, name)
   return (last_values[conn_key] or {})[name]
 end
 
+--- @class LoggedParam
+--- @field name  string
+--- @field list  boolean
+--- @field value string|string[]
+
+--- Return the values `sql` was run with, in order of first appearance and
+--- limited to the parameters it uses — a batch binds one set of values into
+--- every statement — or nil when it uses none.
+--- @param sql    string
+--- @param values table<string, string|string[]>|nil
+--- @return LoggedParam[]|nil
+function M.used_values(sql, values)
+  if not values then return nil end
+  local params = M.find(sql)
+  if not params or #params == 0 then return nil end
+  local out = {}
+  for _, p in ipairs(params) do
+    local v = values[p.name]
+    if v == nil then v = p.list and {} or "" end
+    out[#out + 1] = { name = p.name, list = p.list, value = v }
+  end
+  return out
+end
+
+--- Turn logged parameters back into the values table `bind` and the results
+--- pane take.
+--- @param logged LoggedParam[]|nil
+--- @return table<string, string|string[]>|nil
+function M.values_of(logged)
+  if not logged then return nil end
+  local values = {}
+  for _, p in ipairs(logged) do values[p.name] = p.value end
+  return values
+end
+
+--- Lay out logged parameters as SQL comment lines, to show under the query
+--- they ran with: a header, then one `name = value` line each, a scalar
+--- quoted the way SQL quotes a string and a list as its items.
+--- @param logged LoggedParam[]
+--- @return string[]
+function M.format_logged(logged)
+  --- Quote `v` as a SQL string literal.
+  --- @param v string
+  --- @return string
+  local function quote(v) return "'" .. v:gsub("'", "''") .. "'" end
+  local width = 0
+  for _, p in ipairs(logged) do width = math.max(width, #p.name + (p.list and 2 or 0)) end
+  local lines = { "-- parameters:" }
+  for _, p in ipairs(logged) do
+    local label = p.name .. (p.list and "[]" or "")
+    local shown
+    if p.list then
+      local items = type(p.value) == "table" and p.value or {}
+      shown = #items == 0 and "(empty)" or table.concat(vim.tbl_map(quote, items), ", ")
+    else
+      shown = quote(type(p.value) == "string" and p.value or "")
+    end
+    lines[#lines + 1] = ("--   %s%s = %s"):format(label, (" "):rep(width - #label), shown)
+  end
+  return lines
+end
+
 --- Lay out the hover for placeholder `name`: its kind, its declaration and
 --- the value it last ran with on the buffer's connection.
 --- @param name string

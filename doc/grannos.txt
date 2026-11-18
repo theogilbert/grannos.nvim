@@ -338,7 +338,9 @@ LAYOUT ~
                - Timestamp (HH:MM:SS)
                - Source line number
                - Truncated SQL text
-  Right top    Full SQL of the highlighted list entry.
+  Right top    Full SQL of the highlighted list entry, as written. When it
+               ran with query parameters (|grannos-query-params|), the values
+               bound to them follow as `-- parameters:` comment lines.
   Right bottom Result of the highlighted entry: row table (up to 50 rows),
                row/affected count, or error message.
 
@@ -348,7 +350,7 @@ KEYMAPS ~
   <CR>         In search: move focus to the list.
                In list: close the log, jump to the source line in the
                originating buffer, and restore the result in the results
-               window.
+               window, with the parameter values it ran with.
   <Esc>        In search: clear the filter (or close if already empty).
                In list: close the log.
   /            From the list: return to the search input (insert mode).

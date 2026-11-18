@@ -182,6 +182,7 @@ end
 --- @field rows_total    integer|nil
 --- @field duration_ms   number|nil
 --- @field messages      table[]|nil  ExecuteMessage objects from the response
+--- @field params        LoggedParam[]|nil  query parameter values it ran with
 
 --- Record a new query as "running" and persist it to disk.
 --- `source_line` is 0-indexed.
@@ -189,8 +190,9 @@ end
 --- @param bufnr      integer|nil
 --- @param source_line integer|nil  0-indexed line in the source buffer
 --- @param sql        string
+--- @param params     LoggedParam[]|nil  query parameter values it runs with
 --- @return string  the new entry id
-function M.add(conn_key, bufnr, source_line, sql)
+function M.add(conn_key, bufnr, source_line, sql, params)
   local id          = new_id()
   local source_file = bufnr and vim.api.nvim_buf_get_name(bufnr) or nil
   if source_file == "" then source_file = nil end
@@ -202,6 +204,7 @@ function M.add(conn_key, bufnr, source_line, sql)
     source_file = source_file,
     source_line = source_line,
     sql         = sql,
+    params      = params,
     status      = "running",
   }
   if not state.logs[conn_key] then state.logs[conn_key] = {} end

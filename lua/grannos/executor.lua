@@ -86,7 +86,8 @@ local update_log_from_result  -- forward declaration; defined below run_batch / 
 local function run_batch(queries, conn, idx, bufnr, first_line, had_error, values, target, no_log)
   local q           = queries[idx]
   local source_line = (bufnr and first_line ~= nil) and (first_line + q.line) or nil
-  local log_id      = not no_log and log.add(conn.key, bufnr, source_line, q.sql) or nil
+  local log_id      = not no_log
+      and log.add(conn.key, bufnr, source_line, q.sql, query_params.used_values(q.sql, values)) or nil
   local gh          = (bufnr and first_line ~= nil)
       and gutter.show_running(bufnr, first_line + q.line) or nil
   local req_id = execute(conn, q.sql, values, function(err, result)
@@ -298,7 +299,8 @@ function M.run(conn, query, bufnr, first_line, opts)
         run_batch(queries, conn, 1, bufnr, first_line, false, values, target, opts.auto)
       else
         local sql      = query
-        local log_id   = not opts.auto and log.add(conn.key, bufnr, first_line, sql) or nil
+        local log_id   = not opts.auto
+            and log.add(conn.key, bufnr, first_line, sql, query_params.used_values(sql, values)) or nil
         local gh       = (bufnr and first_line ~= nil) and gutter.show_running(bufnr, first_line) or nil
         local nlines   = select(2, sql:gsub("\n", ""))
         local end_line = (first_line ~= nil) and (first_line + nlines) or nil

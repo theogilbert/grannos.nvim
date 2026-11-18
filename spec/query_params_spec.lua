@@ -120,6 +120,34 @@ describe("query_params.hover_lines", function()
   end)
 end)
 
+describe("query_params.used_values", function()
+  it("keeps the values a statement uses, in order, defaulting missing ones", function()
+    local logged = query_params.used_values("SELECT {{b}}, {{a[]}}, {{b}}", { a = { "1" }, c = "x" })
+    assert.same({ { name = "b", list = false, value = "" }, { name = "a", list = true, value = { "1" } } }, logged)
+    assert.same({ b = "", a = { "1" } }, query_params.values_of(logged))
+  end)
+
+  it("is nil without values or placeholders", function()
+    assert.is_nil(query_params.used_values("SELECT {{a}}", nil))
+    assert.is_nil(query_params.used_values("SELECT 1", { a = "x" }))
+  end)
+end)
+
+describe("query_params.format_logged", function()
+  it("lays values out as aligned SQL comments, quoting each item", function()
+    assert.same({
+      "-- parameters:",
+      "--   status = 'it''s'",
+      "--   ids[]  = '1', '2'",
+      "--   none[] = (empty)",
+    }, query_params.format_logged({
+      { name = "status", list = false, value = "it's" },
+      { name = "ids", list = true, value = { "1", "2" } },
+      { name = "none", list = true, value = {} },
+    }))
+  end)
+end)
+
 describe("query_params.prompt", function()
   local form = require("grannos.ui.conn_form")
   local orig

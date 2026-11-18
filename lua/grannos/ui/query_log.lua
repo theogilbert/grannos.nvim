@@ -12,6 +12,7 @@ local config      = require("grannos.config")
 local pane        = require("grannos.ui.detail_pane")
 local client      = require("grannos.client")
 local connections = require("grannos.connections")
+local query_params = require("grannos.query_params")
 
 --- Format a millisecond duration as a human-readable seconds string.
 --- @param ms number
@@ -147,7 +148,12 @@ function M.open(conn_key, conn)
       return
     end
 
-    set_buf_lines(sql_buf, vim.split(entry.sql, "\n", { plain = true }))
+    local sql_lines = vim.split(entry.sql, "\n", { plain = true })
+    if entry.params and #entry.params > 0 then
+      table.insert(sql_lines, "")
+      vim.list_extend(sql_lines, query_params.format_logged(entry.params))
+    end
+    set_buf_lines(sql_buf, sql_lines)
 
     local res_lines, res_rules = {}, {}
 
@@ -279,7 +285,7 @@ function M.open(conn_key, conn)
       local results_ui = require("grannos.ui.results")
       results_ui.set_conn_name(conn_key, conn and conn.driver_label, entry.bufnr)
       local ft = (entry.bufnr and vim.api.nvim_buf_is_valid(entry.bufnr)) and vim.bo[entry.bufnr].filetype or ""
-      results_ui.set_query(entry.sql, ft, entry.bufnr, entry.source_line)
+      results_ui.set_query(entry.sql, ft, entry.bufnr, entry.source_line, query_params.values_of(entry.params))
       if entry.status == "success" then
         -- Opening an entry (as opposed to browsing it) needs the full result
         -- set; this lazily reads the spillover file for truncated entries.
