@@ -11,6 +11,7 @@
 (boolean) @boolean
 (null) @constant.builtin
 (parameter) @variable.parameter
+(query_parameter) @variable.parameter.placeholder
 
 ; ─── Identifiers ─────────────────────────────────────────────────────────────
 
