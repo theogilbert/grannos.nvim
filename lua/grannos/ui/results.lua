@@ -1494,14 +1494,92 @@ local function make_header(idx, total, sql)
   return { make_separator(idx, total), preview_text(sql) }
 end
 
+--- Return how long ago `since` (a `vim.uv.now()` reading) was, as " 12s".
+--- @param since integer|nil
+--- @return string  "" when `since` is nil
+local function elapsed_suffix(since)
+  if not since then return "" end
+  return ("  %ds"):format(math.floor((vim.uv.now() - since) / 1000))
+end
+
 --- Return the progress line shown under a batch's segments while statements
 --- are still running, or nil once every one of `total` has landed.
 --- @param done  integer  segments appended so far
 --- @param total integer  statements in the batch
+--- @param since integer|nil  `vim.uv.now()` when the batch started
 --- @return string|nil
-local function batch_progress_line(done, total)
+local function batch_progress_line(done, total, since)
   if done >= total then return nil end
   return ("%s Executing %d queries… %d / %d completed"):format(ICON_RUNNING, total, done, total)
+    .. elapsed_suffix(since)
+end
+
+-- Elapsed-time ticker: one timer for every results pane, rewriting each
+-- running query's loading line (or batch progress line) once a second. It
+-- touches a line only while it still reads what the ticker last drew there,
+-- so a result that replaced it is never overwritten; it stops itself once
+-- nothing is running.
+local elapsed_timer = nil
+
+--- Rewrite line `lnum` (0-indexed) of `buf_state`'s buffer with `line` and the
+--- running highlight, when it still reads `expected`.
+--- @param buf_state table
+--- @param lnum      integer
+--- @param expected  string
+--- @param line      string
+--- @return boolean  whether the line was still there to rewrite
+local function rewrite_running_line(buf_state, lnum, expected, line)
+  local buf = buf_state.buffer.buf_id
+  if not vim.api.nvim_buf_is_valid(buf) then return false end
+  if (vim.api.nvim_buf_get_lines(buf, lnum, lnum + 1, false)[1] or nil) ~= expected then return false end
+  local modifiable = vim.bo[buf].modifiable
+  vim.bo[buf].modifiable = true
+  vim.api.nvim_buf_set_lines(buf, lnum, lnum + 1, false, { line })
+  vim.bo[buf].modifiable = modifiable
+  vim.hl.range(buf, hl.NS_ID, "GrannosQueryRunning", { lnum, 0 }, { lnum, -1 })
+  -- As `set_content` does: replacing the first line can push the
+  -- auto-refresh indicator's extmark off it.
+  if lnum == 0 then draw_auto_refresh(buf_state) end
+  return true
+end
+
+--- Advance every running query's elapsed time; stop the timer when none is.
+local function tick_elapsed()
+  local any = false
+  for _, buf_state in pairs(state.buffers) do
+    if buf_state.loading_line then
+      local line = ICON_RUNNING .. " " .. buf_state.loading_msg .. elapsed_suffix(buf_state.loading_since)
+      if rewrite_running_line(buf_state, 0, buf_state.loading_line, line) then
+        buf_state.loading_line = line
+        any = true
+      else
+        buf_state.loading_line = nil
+      end
+    end
+    if buf_state.progress_line then
+      local buf  = buf_state.buffer.buf_id
+      local last = vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_line_count(buf) - 1 or 0
+      local line = batch_progress_line(#(buf_state.segments or {}), buf_state.batch_total or 0, buf_state.batch_since)
+      if line and rewrite_running_line(buf_state, last, buf_state.progress_line, line) then
+        buf_state.progress_line = line
+        any = true
+      else
+        buf_state.progress_line = nil
+      end
+    end
+  end
+  if not any and elapsed_timer then
+    elapsed_timer:stop()
+    elapsed_timer:close()
+    elapsed_timer = nil
+  end
+end
+
+--- Start the elapsed-time ticker unless it is already running.
+local function ensure_elapsed_timer()
+  if elapsed_timer then return end
+  elapsed_timer = vim.uv.new_timer()
+  elapsed_timer:start(1000, 1000, vim.schedule_wrap(tick_elapsed))
 end
 
 --- Concatenate all batch segments into the results buffer, followed by a
@@ -1527,11 +1605,13 @@ local function render_segments(buf_state)
       start = { hdr_lnum + 1, 0 }, finish = { hdr_lnum + 1, -1 } })
     table.insert(all_lines, "")
   end
-  local progress = batch_progress_line(#buf_state.segments, buf_state.batch_total or 0)
+  local progress = batch_progress_line(#buf_state.segments, buf_state.batch_total or 0, buf_state.batch_since)
+  buf_state.progress_line = progress
   if progress then
     table.insert(all_lines, progress)
     table.insert(all_rules, { higroup = "GrannosQueryRunning",
       start = { #all_lines - 1, 0 }, finish = { #all_lines - 1, -1 } })
+    ensure_elapsed_timer()
   end
   if buf_state.auto_running and buf_state.batch_total and #buf_state.segments == buf_state.batch_total then
     buf_state.last_refresh = os.time()
@@ -1547,7 +1627,9 @@ end
 --- @param buf_state table
 local function stop_loading(buf_state)
   if buf_state.is_loading and buf_state.auto_running then buf_state.last_refresh = os.time() end
-  buf_state.is_loading = false
+  buf_state.is_loading    = false
+  buf_state.loading_since = nil
+  buf_state.loading_line  = nil
   draw_auto_refresh(buf_state)
 end
 
@@ -1569,8 +1651,14 @@ function M.show_loading(msg)
   end
   buf_state.table_data  = nil
   buf_state.is_loading  = true
+  -- One clock per run: the later phases ("Processing…", server progress
+  -- messages) keep counting from when the query was sent.
+  buf_state.loading_since = buf_state.loading_since or vim.uv.now()
+  buf_state.loading_msg   = msg
+  buf_state.loading_line  = ICON_RUNNING .. " " .. msg .. elapsed_suffix(buf_state.loading_since)
   ensure_win(buf_state)
-  buf_state.buffer:set_content({ ICON_RUNNING .. " " .. msg })
+  ensure_elapsed_timer()
+  buf_state.buffer:set_content({ buf_state.loading_line })
   buf_state.buffer:apply_highlight({
     { higroup = "GrannosQueryRunning", start = { 0, 0 }, finish = { 0, -1 } },
   })
@@ -1670,6 +1758,7 @@ function M.begin_batch(n)
   buf_state.table_data  = nil
   buf_state.segments    = {}
   buf_state.batch_total = n
+  buf_state.batch_since = vim.uv.now()
   render_segments(buf_state)
 end
 

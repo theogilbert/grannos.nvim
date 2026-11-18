@@ -470,6 +470,8 @@ Query results are shown in a dedicated buffer named `grannos://results`.
 - Multiple statements separated by `;` are executed sequentially; each
   result is shown under a labelled heading (`── Query 1 / 3 ──`, etc.).
 - Results are paginated; page size is controlled by |grannos-page_size|.
+- While a query runs, its "Executing…" line counts the seconds since it was
+  sent; a batch's progress line counts them since the batch started.
 
 The buffer is read-only and reused across queries. Its window is docked
 to the query window the query ran from — split off directly below it, not

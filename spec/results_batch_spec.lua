@@ -18,12 +18,13 @@ local function lines()
   return vim.api.nvim_buf_get_lines(buf, 0, -1, false)
 end
 
---- Return the lines that mention batch progress, minus the running icon.
+--- Return the lines that mention batch progress, minus the running icon and
+--- the elapsed time (see results_elapsed_spec).
 --- @return string[]
 local function progress_lines()
   local out = {}
   for _, l in ipairs(lines()) do
-    if l:find("completed", 1, true) then out[#out + 1] = l:match("Executing.*$") end
+    if l:find("completed", 1, true) then out[#out + 1] = l:match("Executing.*$"):gsub("  %d+s$", "") end
   end
   return out
 end
