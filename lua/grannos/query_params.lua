@@ -11,6 +11,13 @@
 -- real bind marker, and the SQL grammar recovers around one without losing
 -- the statement it sits in. Placeholders inside string literals, quoted
 -- identifiers, dollar-quoted strings and comments are left alone.
+--
+-- A `--` comment line that starts with a placeholder declares it instead:
+--
+--   -- {{status}}: Order status = active | shipped | cancelled
+--
+-- Everything after the placeholder (and an optional colon) describes it; a
+-- trailing `= a | b | c` lists the values its prompt offers in a dropdown.
 local M = {}
 
 --- The bind marker each SQL driver's DB-API module expects, given the
@@ -36,6 +43,10 @@ local last_values = {}
 --- @class QueryParam
 --- @field name string
 --- @field list boolean  true for `{{name[]}}`
+
+--- @class ParamDeclaration
+--- @field description string|nil
+--- @field choices     string[]|nil  the values the prompt offers, in order
 
 --- @class ParamToken
 --- @field s    integer  1-indexed byte where the placeholder starts
@@ -80,6 +91,67 @@ local function scan(sql)
     end
   end
   return tokens
+end
+
+--- Placeholder pattern anchored at its opening braces: captures the name and
+--- the list marker (`[]`, or "" for a scalar).
+local PLACEHOLDER = "{{%s*([%a_][%w_]*)(%[?%]?)%s*}}"
+
+--- Strip one pair of matching quotes around `value`, so a choice written the
+--- way SQL quotes a string (`'active'`) offers the bare value.
+--- @param value string
+--- @return string
+local function unquote(value)
+  local q = value:sub(1, 1)
+  if #value >= 2 and (q == "'" or q == '"') and value:sub(-1) == q then
+    return value:sub(2, -2)
+  end
+  return value
+end
+
+--- Parse the text a declaration comment carries after its placeholder.
+--- `= a | b` at the end lists choices; it only counts as such when there are
+--- at least two, so a description like "rows where x = 1" stays a description.
+--- @param rest string
+--- @return ParamDeclaration
+local function parse_declaration(rest)
+  rest = vim.trim((rest:gsub("^%s*:", "")))
+  local desc, list = rest:match("^(.-)%s*=%s*([^=]*|[^=]*)$")
+  local decl = {}
+  if desc then
+    local choices = {}
+    for _, item in ipairs(vim.split(list, "|", { plain = true })) do
+      item = unquote(vim.trim(item))
+      if item ~= "" then choices[#choices + 1] = item end
+    end
+    if #choices >= 2 then
+      decl.choices = choices
+      rest = desc
+    end
+  end
+  if rest ~= "" then decl.description = rest end
+  return decl
+end
+
+--- Return the declarations `text`'s comment lines make: each `--` line that
+--- starts with a placeholder. A later declaration of a name replaces an
+--- earlier one's description and choices where it gives them.
+--- @param text string
+--- @return table<string, ParamDeclaration>
+function M.declarations(text)
+  local decls = {}
+  for line in (text .. "\n"):gmatch("([^\n]*)\n") do
+    local name, brackets, rest = line:match("^%s*%-%-%s*" .. PLACEHOLDER .. "(.*)$")
+    if name and (brackets == "" or brackets == "[]") then
+      local decl = parse_declaration(rest)
+      local prev = decls[name] or {}
+      decls[name] = {
+        description = decl.description or prev.description,
+        choices     = decl.choices or prev.choices,
+      }
+    end
+  end
+  return decls
 end
 
 --- Whether `driver` takes query parameters.
@@ -172,45 +244,65 @@ end
 
 --- Prompt for every parameter in `params`, prefilled with the values last
 --- submitted on `conn_key`, and hand the submitted values to `on_submit`.
+--- A declared description shows beside its field; declared choices make a
+--- scalar a dropdown (with free text still allowed) and a list a multi-select.
 --- Cancelling calls nothing.
 --- @param conn_key  string
 --- @param params    QueryParam[]
 --- @param on_submit fun(values: table<string, string|string[]>)
-function M.prompt(conn_key, params, on_submit)
+--- @param decls     table<string, ParamDeclaration>|nil  see `declarations`
+function M.prompt(conn_key, params, on_submit, decls)
+  decls = decls or {}
   local remembered = last_values[conn_key] or {}
   local current    = {}
   local fields     = {}
   for _, p in ipairs(params) do
-    local prev = remembered[p.name]
+    local prev    = remembered[p.name]
+    local decl    = decls[p.name] or {}
+    local choices = decl.choices
+    local field
     if p.list then
       current[p.name] = type(prev) == "table" and vim.deepcopy(prev) or {}
-      fields[#fields + 1] = {
-        key          = p.name,
+      field = {
+        kind         = choices and "multichoice" or "multiline",
         label        = p.name .. "[]",
-        kind         = "multiline",
-        get          = function() return current[p.name] end,
         display      = function()
           local items = current[p.name]
-          if #items == 0 then return "(empty — one item per line)" end
+          if #items == 0 then
+            return choices and "(none selected)" or "(empty — one item per line)"
+          end
           return ("%d item%s: %s"):format(#items, #items == 1 and "" or "s", table.concat(items, ", "))
         end,
         edit_prefill = function() return table.concat(current[p.name], "\n") end,
         commit_text  = function(text) current[p.name] = M.parse_list(text) end,
         clear        = function() current[p.name] = {} end,
+        choices      = choices,
+        commit_selection = function(items) current[p.name] = items end,
       }
     else
-      current[p.name] = type(prev) == "string" and prev or ""
-      fields[#fields + 1] = {
-        key          = p.name,
+      current[p.name] = type(prev) == "string" and prev or (choices and choices[1] or "")
+      field = {
+        kind         = choices and "choice" or "text",
         label        = p.name,
-        kind         = "text",
-        get          = function() return current[p.name] end,
         display      = function() return current[p.name] end,
         edit_prefill = function() return current[p.name] end,
         commit_text  = function(text) current[p.name] = text end,
         clear        = function() current[p.name] = "" end,
       }
+      if choices then
+        field.options = function()
+          local items = {}
+          for _, c in ipairs(choices) do items[#items + 1] = { label = c, value = c } end
+          items[#items + 1] = { label = "other…", is_new = true }
+          return items
+        end
+        field.commit_choice = function(item) current[p.name] = item.value end
+      end
     end
+    field.key  = p.name
+    field.get  = function() return current[p.name] end
+    field.hint = decl.description
+    fields[#fields + 1] = field
   end
 
   require("grannos.ui.conn_form").open({

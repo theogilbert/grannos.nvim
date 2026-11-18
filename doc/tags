@@ -42,6 +42,7 @@ grannos-queries_dir	grannos.txt	/*grannos-queries_dir*
 grannos-query-info-key	grannos.txt	/*grannos-query-info-key*
 grannos-query-log	grannos.txt	/*grannos-query-log*
 grannos-query-params	grannos.txt	/*grannos-query-params*
+grannos-query-params-declare	grannos.txt	/*grannos-query-params-declare*
 grannos-requirements	grannos.txt	/*grannos-requirements*
 grannos-results	grannos.txt	/*grannos-results*
 grannos-results-height	grannos.txt	/*grannos-results-height*

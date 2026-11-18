@@ -222,10 +222,13 @@ end
 --- Prompt for `query`'s parameters when it has any and `conn`'s driver takes
 --- them, then call `callback` with the values entered — or with nil straight
 --- away when there is nothing to ask. Not called when the prompt is cancelled.
+--- Declaration comments are read from the whole of `bufnr` when given, since
+--- they usually sit above the statement rather than in it.
 --- @param conn     ConnSession
 --- @param query    string
+--- @param bufnr    integer|nil
 --- @param callback fun(values: table<string, string|string[]>|nil)
-local function with_params(conn, query, callback)
+local function with_params(conn, query, bufnr, callback)
   if not query_params.supports(conn.driver) then callback(nil) return end
   local params, err = query_params.find(query)
   if not params then
@@ -233,7 +236,11 @@ local function with_params(conn, query, callback)
     return
   end
   if #params == 0 then callback(nil) return end
-  query_params.prompt(conn.key, params, callback)
+  local text = query
+  if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
+    text = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
+  end
+  query_params.prompt(conn.key, params, callback, query_params.declarations(text))
 end
 
 --- Execute `query` against `conn`.
@@ -298,7 +305,7 @@ function M.run(conn, query, bufnr, first_line, opts)
         run_single(conn, sql, gh, conn.key, log_id, end_line, values, target)
       end
     end
-    if opts.auto then go(opts.values) else with_params(conn, query, go) end
+    if opts.auto then go(opts.values) else with_params(conn, query, bufnr, go) end
   end, opts.auto)
 end
 

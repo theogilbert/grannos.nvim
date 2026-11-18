@@ -143,6 +143,11 @@ local function render()
     if field.is_valid and not field.is_valid() then
       vim.hl.range(f.buf, NS, "GrannosConnError", { i - 1, 0 }, { i - 1, -1 })
     end
+    if field.hint then
+      vim.api.nvim_buf_set_extmark(f.buf, NS, i - 1, 0, {
+        virt_text = { { "  " .. field.hint, "Comment" } }, virt_text_pos = "eol",
+      })
+    end
   end
   if button_row0 then
     local button_hl = f.test_status == "ok" and "GrannosQuerySuccess"
@@ -412,6 +417,93 @@ local function open_dropdown(field)
   })
 end
 
+--- Open a checklist float listing `field.choices` directly below its row:
+--- <Space> ticks or unticks the item under the cursor, <CR> commits the ticked
+--- items (in list order) via `field.commit_selection`. Items already selected
+--- that are not among the choices — typed as free text — are listed too, so
+--- committing never silently drops them. A last "edit as text…" row opens the
+--- multi-line editor instead.
+--- @param field table  ConnFormField (kind == "multichoice")
+local function open_multichoice(field)
+  local items, ticked = {}, {}
+  for _, c in ipairs(field.choices) do items[#items + 1] = c end
+  for _, v in ipairs(field.get()) do
+    if not vim.tbl_contains(items, v) then items[#items + 1] = v end
+    ticked[v] = true
+  end
+  local edit_row = #items + 1
+
+  local width = 14
+  for _, item in ipairs(items) do width = math.max(width, vim.api.nvim_strwidth(item) + 4) end
+
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[buf].bufhidden = "wipe"
+
+  --- Redraw the checklist from `ticked`.
+  local function draw()
+    local lines = {}
+    for i, item in ipairs(items) do lines[i] = (ticked[item] and " [x] " or " [ ] ") .. item end
+    lines[edit_row] = " edit as text…"
+    vim.bo[buf].modifiable = true
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    vim.bo[buf].modifiable = false
+  end
+  draw()
+
+  local win = vim.api.nvim_open_win(buf, true, {
+    relative  = "win",
+    win       = f.win,
+    bufpos    = { field._row0, field._value_col },
+    row       = 1,
+    col       = 0,
+    width     = width + 2,
+    height    = edit_row,
+    style     = "minimal",
+    border    = "rounded",
+    footer    = " <Space> toggle  <CR> done ",
+    footer_pos = "center",
+    zindex    = 60,
+  })
+  vim.api.nvim_win_set_hl_ns(win, hl.NS_ID)
+  vim.api.nvim_set_option_value("cursorline", true, { win = win })
+
+  --- Close the checklist only (the parent form stays open).
+  local function close_list()
+    if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end
+  end
+
+  --- Tick or untick the item under the cursor.
+  local function toggle()
+    local idx = vim.api.nvim_win_get_cursor(win)[1]
+    local item = items[idx]
+    if not item then return end
+    ticked[item] = not ticked[item] or nil
+    draw()
+  end
+
+  --- Commit the ticked items, or open the text editor from its row.
+  local function done()
+    local idx = vim.api.nvim_win_get_cursor(win)[1]
+    close_list()
+    if idx == edit_row then
+      vim.schedule(function() open_multiline_overlay(field) end)
+      return
+    end
+    local selected = {}
+    for _, item in ipairs(items) do
+      if ticked[item] then selected[#selected + 1] = item end
+    end
+    field.commit_selection(selected)
+    render()
+  end
+
+  vim.keymap.set("n", "<Space>", toggle, { buffer = buf, nowait = true, silent = true })
+  vim.keymap.set("n", "<CR>", done, { buffer = buf, nowait = true, silent = true })
+  for _, key in ipairs({ "q", "<Esc>", "<C-c>" }) do
+    vim.keymap.set("n", key, close_list, { buffer = buf, nowait = true, silent = true })
+  end
+end
+
 --- Run the caller-supplied connectivity check (on_test) against the form's
 --- current, unsaved field values. Shows "testing…" while in flight, then a
 --- green check or a red cross + inline error message on completion. Guards
@@ -453,6 +545,8 @@ local function activate()
     render()
   elseif field.kind == "choice" then
     open_dropdown(field)
+  elseif field.kind == "multichoice" then
+    open_multichoice(field)
   elseif field.kind == "multiline" then
     open_multiline_overlay(field)
   else
@@ -508,10 +602,12 @@ end
 --- @param opts table
 ---   .title     string
 ---   .fields    table[]  ConnFormField list (see module docstring for the shape:
----              key, label, kind ("text"|"secret"|"multiline"|"choice"|"toggle"), get, display,
----              is_valid, edit_prefill/commit_text for text/secret/multiline (a multiline
----              field's text joins its lines with "\n"), options/commit_choice for choice,
----              toggle for toggle, optional clear for any field `x` may empty)
+---              key, label, kind ("text"|"secret"|"multiline"|"choice"|"multichoice"|"toggle"),
+---              get, display, is_valid, edit_prefill/commit_text for text/secret/multiline (a
+---              multiline field's text joins its lines with "\n"), options/commit_choice for
+---              choice, choices/commit_selection (plus edit_prefill/commit_text for its
+---              "edit as text…" row) for multichoice, toggle for toggle, optional clear for
+---              any field `x` may empty, optional hint shown dimmed after the value)
 ---   .submit_label string|nil  what <C-s> does, for the footer hint (default "save")
 ---   .on_submit fun(values: table<string, any>, done: fun(err: string|nil))
 ---   .on_cancel fun()

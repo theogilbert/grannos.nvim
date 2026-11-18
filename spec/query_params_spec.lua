@@ -75,3 +75,52 @@ describe("query_params.parse_list", function()
     assert.are.same({ "a", "b c", "d" }, query_params.parse_list("  a\n\nb c \n\td\n"))
   end)
 end)
+
+describe("query_params.declarations", function()
+  it("reads a description and choices from a comment line", function()
+    local decls = query_params.declarations(table.concat({
+      "-- {{status}}: Order status = active | 'shipped' | cancelled",
+      "-- {{ids[]}} customer ids",
+      "SELECT * FROM t WHERE s = {{status}} -- {{not_a_decl}}: no",
+    }, "\n"))
+    assert.are.same({ description = "Order status", choices = { "active", "shipped", "cancelled" } }, decls.status)
+    assert.are.same({ description = "customer ids" }, decls.ids)
+    assert.is_nil(decls.not_a_decl)
+  end)
+
+  it("keeps a single = in the description rather than taking one choice", function()
+    local decls = query_params.declarations("-- {{n}}: rows where x = 1")
+    assert.are.same({ description = "rows where x = 1" }, decls.n)
+  end)
+
+  it("takes choices alone, and merges a later declaration into an earlier one", function()
+    local decls = query_params.declarations("-- {{s}} = a | b\n-- {{s}}: the s")
+    assert.are.same({ description = "the s", choices = { "a", "b" } }, decls.s)
+  end)
+end)
+
+describe("query_params.prompt", function()
+  local form = require("grannos.ui.conn_form")
+  local orig
+
+  before_each(function() orig = form.open end)
+  after_each(function() form.open = orig end)
+
+  it("turns declared choices into a dropdown, a multi-select and hints", function()
+    local opened
+    form.open = function(opts) opened = opts end
+    query_params.prompt("k-decl", { { name = "s", list = false }, { name = "xs", list = true }, { name = "t", list = false } },
+      function() end,
+      { s = { description = "status", choices = { "a", "b" } }, xs = { choices = { "x", "y" } } })
+    local s, xs, t = opened.fields[1], opened.fields[2], opened.fields[3]
+    assert.are.equal("choice", s.kind)
+    assert.are.equal("status", s.hint)
+    assert.are.equal("a", s.get())  -- first choice by default
+    assert.are.same({ "a", "b", "other…" }, vim.tbl_map(function(o) return o.label end, s.options()))
+    assert.are.equal("multichoice", xs.kind)
+    xs.commit_selection({ "y" })
+    assert.are.same({ "y" }, xs.get())
+    assert.are.equal("text", t.kind)
+    assert.is_nil(t.hint)
+  end)
+end)

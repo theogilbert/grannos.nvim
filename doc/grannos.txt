@@ -291,6 +291,25 @@ the column it is compared with. A placeholder inside a string literal, a
 quoted identifier or a comment is left as written. One name cannot be both a
 single value and a list in the same query.
 
+                                               *grannos-query-params-declare*
+A `--` comment line that starts with a placeholder declares it. Everything
+after the placeholder (and an optional colon) is a description, shown dimmed
+beside its field in the form; a trailing `= a | b | c` lists the values the
+form offers: >sql
+    -- {{status}}: Order status = active | shipped | cancelled
+    -- {{customers[]}}: Customer ids
+    SELECT * FROM orders
+    WHERE status = {{status}} AND customer_id IN ({{customers[]}})
+<
+A declaration may sit anywhere in the buffer; it usually goes above the
+statement, and it applies to every statement in the buffer. Quotes around a
+choice are dropped (`'active'` offers `active`). It takes at least two
+choices to make a list, so a description such as `rows where x = 1` stays a
+description. A single value with choices becomes a dropdown, defaulting to
+the first choice, with an "other…" entry for free text. A list with choices
+becomes a checklist: <Space> ticks an item, <CR> keeps the ticked ones, and
+its "edit as text…" row opens the multi-line editor instead.
+
 In the form, <CR> edits the field under the cursor and <C-s> runs the query
 (q/<Esc> cancels it). A list field opens a multi-line editor: type one item
 per line, then <C-s> to keep the text, or <Esc> in normal mode to discard
