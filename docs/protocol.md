@@ -131,7 +131,7 @@ Only drivers whose dependencies are installed appear in the response.
   "id": 1,
   "result": {
     "server": "grannos",
-    "protocol_version": "1.2",
+    "protocol_version": "1.3",
     "drivers": [
       {
         "driver": "mydriver",
@@ -671,6 +671,7 @@ String enum of standard query-language identifiers used in `Driver.languages`:
 | `"promql"` | Prometheus Query Language (PromQL) |
 | `"lucene"` | Elasticsearch in Lucene mode: `<index> \| <query_string>` |
 | `"mongo"`  | MongoDB Extended JSON command objects, one per statement |
+| `"es_console"` | Elasticsearch in Dev Tools mode: Kibana Console requests, `METHOD /path` then an optional JSON (or NDJSON) body (added in `1.3`) |
 
 Mapping these to editor-specific concepts (e.g. Vim filetypes) is the client's responsibility.
 
@@ -692,6 +693,7 @@ Mapping these to editor-specific concepts (e.g. Vim filetypes) is the client's r
 |---------|--------|------------------------------------------------|
 | `value` | string | Machine-readable value sent in `connect.params` |
 | `label` | string | Human-readable display name shown in the UI    |
+| `language` | [Language](#language) \| null | The query language a connection speaks when this option is chosen, for a parameter that switches a driver's syntax (Elasticsearch's `query_mode`); `null` defers to the driver's `languages`. Lets a client tell a saved connection's language without connecting. (Added in protocol `1.3`.) |
 
 ---
 

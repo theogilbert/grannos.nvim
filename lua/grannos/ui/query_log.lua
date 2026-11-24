@@ -74,7 +74,8 @@ function M.open(conn_key, conn)
   local sql_buf = vim.api.nvim_create_buf(false, true)
   vim.bo[sql_buf].bufhidden  = "wipe"
   vim.bo[sql_buf].modifiable = false
-  vim.bo[sql_buf].filetype   = connections.driver_filetype(client.capabilities(), conn and conn.driver)
+  vim.bo[sql_buf].filetype   = connections.driver_filetype(client.capabilities(), conn and conn.driver,
+    conn and connections.get(conn.key))
   pcall(vim.treesitter.start, sql_buf)
 
   -- Results preview (read-only).
@@ -151,7 +152,8 @@ function M.open(conn_key, conn)
     local sql_lines = vim.split(entry.sql, "\n", { plain = true })
     if entry.params and #entry.params > 0 then
       table.insert(sql_lines, "")
-      vim.list_extend(sql_lines, query_params.format_logged(entry.params))
+      vim.list_extend(sql_lines, query_params.format_logged(entry.params,
+        vim.bo[sql_buf].commentstring:match("^(.-)%s*%%s")))
     end
     set_buf_lines(sql_buf, sql_lines)
 

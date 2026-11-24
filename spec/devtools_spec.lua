@@ -114,3 +114,30 @@ describe("devtools.applies", function()
     assert.is_false(devtools.applies(nil))
   end)
 end)
+
+describe("esconsole write detection", function()
+  local ts_queries = require("grannos.ts_queries")
+
+  --- Return whether the single request `line` is detected as a write.
+  --- @param line string
+  --- @return boolean
+  local function writes(line)
+    local bufnr = make_buf({ line })
+    vim.bo[bufnr].filetype = "esconsole"
+    return ts_queries.has_write_statement(bufnr, 0, 0)
+  end
+
+  it("reads GET, HEAD and POSTs to read endpoints", function()
+    assert.is_false(writes("GET /orders/_search"))
+    assert.is_false(writes("head /orders"))
+    assert.is_false(writes("POST /orders/_search"))
+    assert.is_false(writes("POST _query"))
+  end)
+
+  it("writes PUT, DELETE and other POSTs", function()
+    assert.is_true(writes("PUT /orders"))
+    assert.is_true(writes("DELETE /orders/_doc/1"))
+    assert.is_true(writes("POST _bulk"))
+    assert.is_true(writes("POST /orders/_doc"))
+  end)
+end)

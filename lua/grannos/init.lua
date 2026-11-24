@@ -1012,7 +1012,7 @@ function M.describe_symbol_at_cursor()
   -- A query parameter is described from the buffer alone: its declaration
   -- comment and the value it last ran with.
   local conn = state.conns[state.buf_conns[bufnr] or ""]
-  if conn and query_params.supports(conn.driver) then
+  if query_params.supports(conn) then
     local row, col = unpack(vim.api.nvim_win_get_cursor(0))
     local line = vim.api.nvim_buf_get_lines(bufnr, row - 1, row, false)[1] or ""
     local ph = query_params.placeholder_at(line, col)

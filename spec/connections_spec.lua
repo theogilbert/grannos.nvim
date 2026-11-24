@@ -240,4 +240,34 @@ describe("connections.driver_filetype", function()
     assert.equals("sql", connections.driver_filetype(caps, "unknown"))
     assert.equals("sql", connections.driver_filetype(nil, "prometheus"))
   end)
+
+  describe("with a query mode naming its language", function()
+    local es_caps = { drivers = { {
+      driver    = "elasticsearch",
+      languages = { "lucene", "es_console" },
+      params    = { {
+        key = "query_mode", type = "enum", default = "lucene",
+        choices = {
+          { value = "lucene",    label = "Lucene",    language = "lucene" },
+          { value = "dev_tools", label = "Dev Tools", language = "es_console" },
+          { value = "esql",      label = "ES|QL",     language = vim.NIL },
+        },
+      } },
+    } } }
+
+    it("follows the connection's chosen mode", function()
+      assert.equals("esconsole", connections.driver_filetype(es_caps, "elasticsearch", { query_mode = "dev_tools" }))
+      assert.equals("lucene", connections.driver_filetype(es_caps, "elasticsearch", { query_mode = "lucene" }))
+    end)
+
+    it("uses the parameter's default when the connection leaves it unset", function()
+      assert.equals("lucene", connections.driver_filetype(es_caps, "elasticsearch", {}))
+    end)
+
+    it("falls back to the driver's languages for a mode naming none", function()
+      assert.same({ "lucene", "es_console" },
+        connections.conn_languages(es_caps, "elasticsearch", { query_mode = "esql" }))
+      assert.equals("lucene", connections.driver_filetype(es_caps, "elasticsearch", { query_mode = "esql" }))
+    end)
+  end)
 end)

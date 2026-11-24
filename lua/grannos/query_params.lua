@@ -12,7 +12,16 @@
 -- the statement it sits in. Placeholders inside string literals, quoted
 -- identifiers, dollar-quoted strings and comments are left alone.
 --
--- A `--` comment line that starts with a placeholder declares it instead:
+-- Elasticsearch Dev Tools requests take placeholders too, but Elasticsearch
+-- has no bind parameters: the value is written into the request text, encoded
+-- for where the placeholder stands. The `esconsole` grammar tells where: a
+-- `parameter` node in a path or query string is URL-encoded, one standing as
+-- a JSON value becomes a JSON literal (a number, boolean or null as typed,
+-- anything else a string; a list an array), and one inside a JSON string is
+-- escaped as string content (a list joined with commas).
+--
+-- A comment line (`--`, `#` or `//`) that starts with a placeholder declares
+-- it instead:
 --
 --   -- {{status}}: Order status = active | shipped | cancelled
 --
@@ -35,6 +44,10 @@ local MARKERS = {
 --- given, so every literal `%` must be doubled.
 local PERCENT_ESCAPED = { postgres = true }
 
+--- Drivers whose placeholders are substituted into the request text, which
+--- is in the `esconsole` dialect. Only in Dev Tools mode (see `M.dialect`).
+local CONSOLE_DRIVERS = { elasticsearch = true }
+
 --- Values last submitted, per connection key then parameter name, to prefill
 --- the next prompt.
 --- @type table<string, table<string, string|string[]>>
@@ -49,10 +62,11 @@ local last_values = {}
 --- @field choices     string[]|nil  the values the prompt offers, in order
 
 --- @class ParamToken
---- @field s    integer  1-indexed byte where the placeholder starts
---- @field e    integer  1-indexed byte where it ends (inclusive)
---- @field name string
---- @field list boolean
+--- @field s       integer  1-indexed byte where the placeholder starts
+--- @field e       integer  1-indexed byte where it ends (inclusive)
+--- @field name    string
+--- @field list    boolean
+--- @field context "path"|"value"|"string"|nil  where an esconsole placeholder stands
 
 --- Return every placeholder in `sql`, in order, skipping quoted text and comments.
 --- @param sql string
@@ -97,6 +111,57 @@ end
 --- the list marker (`[]`, or "" for a scalar).
 local PLACEHOLDER = "{{%s*([%a_][%w_]*)(%[?%]?)%s*}}"
 
+--- Where a `parameter` node's parent puts it, for encoding its value.
+local CONSOLE_CONTEXT = {
+  segment        = "path",
+  param_value    = "path",
+  string_content = "string",
+}
+
+--- Return every placeholder in Console request text `text`, in order, from
+--- the `esconsole` grammar's `parameter` nodes — so ones in comments are
+--- skipped and ones inside JSON strings are found. Nil when the parser is
+--- not installed.
+--- @param text string
+--- @return ParamToken[]|nil
+local function scan_console(text)
+  local ok, parser = pcall(vim.treesitter.get_string_parser, text, "esconsole")
+  if not ok or not parser then return nil end
+  local tree = parser:parse()[1]
+  if not tree then return nil end
+  local tokens = {}
+  --- Collect the parameter nodes under `node`, depth first.
+  --- @param node userdata
+  local function walk(node)
+    for child in node:iter_children() do
+      if child:type() == "parameter" then
+        local _, _, sb = child:start()
+        local _, _, eb = child:end_()
+        local name, brackets = text:sub(sb + 1, eb):match("^" .. PLACEHOLDER .. "$")
+        if name then
+          tokens[#tokens + 1] = {
+            s = sb + 1, e = eb, name = name, list = brackets == "[]",
+            context = CONSOLE_CONTEXT[node:type()] or "value",
+          }
+        end
+      else
+        walk(child)
+      end
+    end
+  end
+  walk(tree:root())
+  return tokens
+end
+
+--- Return the placeholders of `text` in `dialect`.
+--- @param text    string
+--- @param dialect "sql"|"esconsole"|nil  nil is "sql"
+--- @return ParamToken[]|nil  nil when the dialect's parser is not installed
+local function tokens_of(text, dialect)
+  if dialect == "esconsole" then return scan_console(text) end
+  return scan(text)
+end
+
 --- Strip one pair of matching quotes around `value`, so a choice written the
 --- way SQL quotes a string (`'active'`) offers the bare value.
 --- @param value string
@@ -133,15 +198,23 @@ local function parse_declaration(rest)
   return decl
 end
 
---- Return the declarations `text`'s comment lines make: each `--` line that
---- starts with a placeholder. A later declaration of a name replaces an
+--- Comment openers a declaration line may start with, as Lua patterns: SQL's
+--- and Lucene's `--`, Console's `#` and `//`.
+local DECLARATION_PREFIXES = { "%-%-", "#", "//" }
+
+--- Return the declarations `text`'s comment lines make: each comment line
+--- (`--`, `#` or `//`) that starts with a placeholder. A later declaration of a name replaces an
 --- earlier one's description and choices where it gives them.
 --- @param text string
 --- @return table<string, ParamDeclaration>
 function M.declarations(text)
   local decls = {}
   for line in (text .. "\n"):gmatch("([^\n]*)\n") do
-    local name, brackets, rest = line:match("^%s*%-%-%s*" .. PLACEHOLDER .. "(.*)$")
+    local name, brackets, rest
+    for _, prefix in ipairs(DECLARATION_PREFIXES) do
+      name, brackets, rest = line:match("^%s*" .. prefix .. "%s*" .. PLACEHOLDER .. "(.*)$")
+      if name then break end
+    end
     if name and (brackets == "" or brackets == "[]") then
       local decl = parse_declaration(rest)
       local prev = decls[name] or {}
@@ -187,12 +260,13 @@ end
 --- Return the values `sql` was run with, in order of first appearance and
 --- limited to the parameters it uses — a batch binds one set of values into
 --- every statement — or nil when it uses none.
---- @param sql    string
---- @param values table<string, string|string[]>|nil
+--- @param sql     string
+--- @param values  table<string, string|string[]>|nil
+--- @param dialect "sql"|"esconsole"|nil  the query's dialect (see `M.dialect`)
 --- @return LoggedParam[]|nil
-function M.used_values(sql, values)
+function M.used_values(sql, values, dialect)
   if not values then return nil end
-  local params = M.find(sql)
+  local params = M.find(sql, dialect)
   if not params or #params == 0 then return nil end
   local out = {}
   for _, p in ipairs(params) do
@@ -214,19 +288,21 @@ function M.values_of(logged)
   return values
 end
 
---- Lay out logged parameters as SQL comment lines, to show under the query
---- they ran with: a header, then one `name = value` line each, a scalar
---- quoted the way SQL quotes a string and a list as its items.
---- @param logged LoggedParam[]
+--- Lay out logged parameters as comment lines, to show under the query they
+--- ran with: a header, then one `name = value` line each, a scalar quoted
+--- the way SQL quotes a string and a list as its items.
+--- @param logged  LoggedParam[]
+--- @param comment string|nil  the line-comment opener; "--" when nil
 --- @return string[]
-function M.format_logged(logged)
+function M.format_logged(logged, comment)
+  comment = comment or "--"
   --- Quote `v` as a SQL string literal.
   --- @param v string
   --- @return string
   local function quote(v) return "'" .. v:gsub("'", "''") .. "'" end
   local width = 0
   for _, p in ipairs(logged) do width = math.max(width, #p.name + (p.list and 2 or 0)) end
-  local lines = { "-- parameters:" }
+  local lines = { comment .. " parameters:" }
   for _, p in ipairs(logged) do
     local label = p.name .. (p.list and "[]" or "")
     local shown
@@ -236,7 +312,7 @@ function M.format_logged(logged)
     else
       shown = quote(type(p.value) == "string" and p.value or "")
     end
-    lines[#lines + 1] = ("--   %s%s = %s"):format(label, (" "):rep(width - #label), shown)
+    lines[#lines + 1] = ("%s   %s%s = %s"):format(comment, label, (" "):rep(width - #label), shown)
   end
   return lines
 end
@@ -270,21 +346,41 @@ function M.hover_lines(name, list, decl, last)
   return lines, hls
 end
 
---- Whether `driver` takes query parameters.
---- @param driver string
+--- Return the placeholder dialect of `conn`'s queries: "sql" for the drivers
+--- that bind parameters, "esconsole" for an Elasticsearch connection in Dev
+--- Tools mode, nil for a connection whose queries take none.
+--- @param conn { driver: string, key: string }|nil
+--- @return "sql"|"esconsole"|nil
+function M.dialect(conn)
+  if not conn then return nil end
+  if MARKERS[conn.driver] then return "sql" end
+  if CONSOLE_DRIVERS[conn.driver] and require("grannos.devtools").applies(conn) then
+    return "esconsole"
+  end
+  return nil
+end
+
+--- Whether `conn`'s queries take query parameters.
+--- @param conn { driver: string, key: string }|nil
 --- @return boolean
-function M.supports(driver)
-  return MARKERS[driver] ~= nil
+function M.supports(conn)
+  return M.dialect(conn) ~= nil
 end
 
 --- Return the distinct parameters `sql` names, in order of first appearance.
---- Errors when one name is used both as a scalar and as a list.
---- @param sql string
+--- Errors when one name is used both as a scalar and as a list, or when the
+--- dialect's parser is not installed.
+--- @param sql     string
+--- @param dialect "sql"|"esconsole"|nil  nil is "sql"
 --- @return QueryParam[]|nil params
 --- @return string|nil err
-function M.find(sql)
+function M.find(sql, dialect)
+  local tokens = tokens_of(sql, dialect)
+  if not tokens then
+    return nil, ("the %s treesitter parser is not installed: see :checkhealth grannos"):format(dialect)
+  end
   local params, seen = {}, {}
-  for _, tok in ipairs(scan(sql)) do
+  for _, tok in ipairs(tokens) do
     local prev = seen[tok.name]
     if not prev then
       prev = { name = tok.name, list = tok.list }
@@ -304,6 +400,7 @@ end
 --- @return string query  the text to execute
 --- @return string[] binds  positional bind values, in marker order
 function M.bind(sql, driver, values)
+  if CONSOLE_DRIVERS[driver] then return M.substitute(sql, values), {} end
   local marker = MARKERS[driver]
   local tokens = scan(sql)
   if not marker or #tokens == 0 then return sql, {} end
@@ -343,6 +440,76 @@ function M.bind(sql, driver, values)
     for idx in pairs(literal) do pieces[idx] = pieces[idx]:gsub("%%", "%%%%") end
   end
   return table.concat(pieces), binds
+end
+
+--- Percent-encode `s` for a URL path segment or query value. Unreserved
+--- characters stay, and so do `*` and `,`, which Elasticsearch reads in an
+--- index pattern or list (`logs-*,metrics-*`).
+--- @param s string
+--- @return string
+local function url_encode(s)
+  return (s:gsub("[^%w%-._~*,]", function(c) return ("%%%02X"):format(c:byte()) end))
+end
+
+--- Return true when `s` is a JSON number as JSON writes one: no leading
+--- zero, `+` or bare dot, which `vim.json.decode` would accept but
+--- Elasticsearch's parser would not.
+--- @param s string
+--- @return boolean
+local function is_json_number(s)
+  local rest = s:match("^%-?0(.*)$") or s:match("^%-?[1-9]%d*(.*)$")
+  if not rest then return false end
+  rest = rest:gsub("^%.%d+", "", 1)
+  rest = rest:gsub("^[eE][%+%-]?%d+", "", 1)
+  return rest == ""
+end
+
+--- Return `s` as a JSON literal: itself when it already is a number, boolean
+--- or null, else a JSON string.
+--- @param s string
+--- @return string
+local function json_literal(s)
+  if s == "true" or s == "false" or s == "null" or is_json_number(s) then return s end
+  return vim.json.encode(s)
+end
+
+--- Return `s` escaped as the content of a JSON string.
+--- @param s string
+--- @return string
+local function json_content(s)
+  return vim.json.encode(s):sub(2, -2)
+end
+
+--- The encoder of a placeholder value, per place it stands.
+local ENCODERS = { path = url_encode, string = json_content, value = json_literal }
+
+--- Write `values` into Console request text `text` in place of its
+--- placeholders, each encoded for where it stands (see the module header).
+--- A list joins its encoded items with commas, and as a JSON value is
+--- bracketed into an array. Text with no placeholders, or whose parser is not
+--- installed, is returned unchanged.
+--- @param text   string
+--- @param values table<string, string|string[]>  a string per scalar, a list per list parameter
+--- @return string
+function M.substitute(text, values)
+  local tokens = scan_console(text)
+  if not tokens or #tokens == 0 then return text end
+  local pieces, pos = {}, 1
+  for _, tok in ipairs(tokens) do
+    pieces[#pieces + 1] = text:sub(pos, tok.s - 1)
+    local encode = ENCODERS[tok.context]
+    local value  = values[tok.name]
+    if tok.list then
+      local items = vim.tbl_map(encode, type(value) == "table" and value or {})
+      local joined = table.concat(items, ",")
+      pieces[#pieces + 1] = tok.context == "value" and ("[" .. joined .. "]") or joined
+    else
+      pieces[#pieces + 1] = encode(type(value) == "string" and value or "")
+    end
+    pos = tok.e + 1
+  end
+  pieces[#pieces + 1] = text:sub(pos)
+  return table.concat(pieces)
 end
 
 --- Split a list parameter's free text into its items: one per non-blank line,

@@ -14,7 +14,7 @@ local connections = require("grannos.connections")
 -- Languages with a symbol extractor (see grannos/symbols/init.lua) or
 -- completion (grannos/completion/init.lua), each shipped as a precompiled
 -- parser under parser/.
-local LANGUAGES = { "sql", "cypher", "promql", "lucene", "mongo" }
+local LANGUAGES = { "sql", "cypher", "promql", "lucene", "mongo", "esconsole" }
 
 -- How long the probe waits for the backend to answer `capabilities`.
 local PROBE_TIMEOUT_MS = 5000

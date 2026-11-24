@@ -87,7 +87,7 @@ local function run_batch(queries, conn, idx, bufnr, first_line, had_error, value
   local q           = queries[idx]
   local source_line = (bufnr and first_line ~= nil) and (first_line + q.line) or nil
   local log_id      = not no_log
-      and log.add(conn.key, bufnr, source_line, q.sql, query_params.used_values(q.sql, values)) or nil
+      and log.add(conn.key, bufnr, source_line, q.sql, query_params.used_values(q.sql, values, query_params.dialect(conn))) or nil
   local gh          = (bufnr and first_line ~= nil)
       and gutter.show_running(bufnr, first_line + q.line) or nil
   local req_id = execute(conn, q.sql, values, function(err, result)
@@ -230,8 +230,9 @@ end
 --- @param bufnr    integer|nil
 --- @param callback fun(values: table<string, string|string[]>|nil)
 local function with_params(conn, query, bufnr, callback)
-  if not query_params.supports(conn.driver) then callback(nil) return end
-  local params, err = query_params.find(query)
+  local dialect = query_params.dialect(conn)
+  if not dialect then callback(nil) return end
+  local params, err = query_params.find(query, dialect)
   if not params then
     vim.notify("grannos: " .. err, vim.log.levels.ERROR)
     return
@@ -300,7 +301,7 @@ function M.run(conn, query, bufnr, first_line, opts)
       else
         local sql      = query
         local log_id   = not opts.auto
-            and log.add(conn.key, bufnr, first_line, sql, query_params.used_values(sql, values)) or nil
+            and log.add(conn.key, bufnr, first_line, sql, query_params.used_values(sql, values, query_params.dialect(conn))) or nil
         local gh       = (bufnr and first_line ~= nil) and gutter.show_running(bufnr, first_line) or nil
         local nlines   = select(2, sql:gsub("\n", ""))
         local end_line = (first_line ~= nil) and (first_line + nlines) or nil

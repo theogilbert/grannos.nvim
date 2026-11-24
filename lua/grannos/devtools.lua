@@ -1,10 +1,13 @@
 -- Splits Elasticsearch Dev Tools (Kibana Console) buffers into requests.
 --
--- A Dev Tools connection's buffers carry the driver's `lucene` filetype, whose
--- grammar cannot parse `METHOD /path` + JSON body, so treesitter finds no
--- statement in them. This module stands in for ts_queries' statement API on
--- such buffers, splitting textually the way Console does: a request starts at
--- a line opening with an HTTP method and a path, and runs until the next one.
+-- This module stands in for ts_queries' statement API on a Dev Tools
+-- connection's buffers, splitting textually the way Console does: a request
+-- starts at a line opening with an HTTP method and a path, and runs until the
+-- next one. It is used even where the `esconsole` grammar parses the buffer:
+-- a body with a syntax error falls outside the tree's `statement`, so a tree
+-- split would silently send its request with no body, where this one sends
+-- the broken body and lets the server report it. It also serves a Dev Tools
+-- buffer of any other filetype (a `.lucene` file from before `.esconsole`).
 -- `#` and `//` line comments and `/* */` block comments never start a request,
 -- and trailing blank or comment lines do not belong to the one before them.
 

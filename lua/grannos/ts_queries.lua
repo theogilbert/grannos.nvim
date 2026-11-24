@@ -60,6 +60,38 @@ local function mongo_statement_writes(stmt, bufnr)
   return false
 end
 
+-- Endpoints a Console POST reads from rather than writes to: POST is how a
+-- request with a body is sent to most of them.
+local CONSOLE_READ_ENDPOINTS = {
+  _search = true, _msearch = true, _count = true, _mget = true,
+  _query = true, _sql = true, _eql = true, _field_caps = true,
+  _validate = true, _explain = true, _analyze = true, _termvectors = true,
+  _mtermvectors = true, _rank_eval = true, _search_shards = true,
+  _async_search = true, _pit = true, _render = true,
+}
+
+--- Return true when `stmt` is an Elasticsearch Console request that writes:
+--- any PUT, DELETE or PATCH, and a POST unless one of its path segments names
+--- a read endpoint (`POST /orders/_search`, `POST _query`). GET and HEAD
+--- never write.
+--- @param stmt  userdata  a `statement` node
+--- @param bufnr integer
+--- @return boolean
+local function console_statement_writes(stmt, bufnr)
+  local method = stmt:field("method")[1]
+  if not method then return false end
+  local verb = vim.treesitter.get_node_text(method, bufnr):upper()
+  if verb == "GET" or verb == "HEAD" then return false end
+  if verb ~= "POST" then return true end
+  local path = stmt:field("path")[1]
+  for seg in (path and path:iter_children() or function() end) do
+    if seg:type() == "segment" and CONSOLE_READ_ENDPOINTS[vim.treesitter.get_node_text(seg, bufnr)] then
+      return false
+    end
+  end
+  return true
+end
+
 --- @class SqlStatement
 --- @field text      string   query text with trailing semicolons stripped
 --- @field start_row integer  0-indexed start row
@@ -99,7 +131,13 @@ function M.has_write_statement(bufnr, start_row, end_row)
     if node:type() == "statement" then
       local sr, _, er, _ = node:range()
       if sr <= end_row and er >= start_row then
-        if node_has_write(node) or mongo_statement_writes(node, bufnr) then return true end
+        local writes
+        if node:field("method")[1] then
+          writes = console_statement_writes(node, bufnr)
+        else
+          writes = node_has_write(node) or mongo_statement_writes(node, bufnr)
+        end
+        if writes then return true end
       end
     end
   end

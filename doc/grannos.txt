@@ -291,8 +291,31 @@ the column it is compared with. A placeholder inside a string literal, a
 quoted identifier or a comment is left as written. One name cannot be both a
 single value and a list in the same query.
 
+                                               *grannos-query-params-console*
+Elasticsearch requests in Dev Tools mode (|grannos-esconsole|) take the same
+placeholders. Elasticsearch has no bind parameters, so each value is written
+into the request text, encoded for where its placeholder stands:
+
+  in the path or query string
+          URL-encoded (`*` and `,` kept, for index patterns and lists).
+  as a JSON value, `"size": {{n}}`
+          A JSON literal: a number, `true`, `false` or `null` as typed,
+          anything else a quoted string. A list becomes an array.
+  inside a JSON string, `"{{status}}"`
+          Escaped as string content. Quote a placeholder to always send
+          a string: `"{{id}}"` with `10` sends `"10"`, where `{{id}}`
+          would send the number `10`.
+
+A list joins its items with commas in a path or a string. Placeholders are
+found with the `esconsole` treesitter parser, so one inside a comment is left
+alone and one inside a JSON string is substituted: >
+    # {{index}}: Index to search
+    GET /{{index}}/_search
+    {"size": {{n}}, "query": {"terms": {"status": {{statuses[]}}}}}
+<
                                                *grannos-query-params-declare*
-A `--` comment line that starts with a placeholder declares it. Everything
+A comment line (`--`, or `#` or `//` in a Dev Tools request) that starts
+with a placeholder declares it. Everything
 after the placeholder (and an optional colon) is a description, shown dimmed
 beside its field in the form; a trailing `= a | b | c` lists the values the
 form offers: >sql
@@ -416,7 +439,7 @@ The directory tree mirrors the scope hierarchy: >
   connection/<server>/<driver>/<group>/<conn>/<name>.<ext>
 <
 The file extension is taken from the source buffer (e.g. `.sql`, `.cypher`,
-`.lucene`, `.mongo`).
+`.lucene`, `.mongo`, `.esconsole`).
 Files can be opened, edited, and deleted directly in the filesystem.
 The directory is created automatically on first save. Override the location
 with |grannos-queries_dir|.
@@ -698,6 +721,18 @@ In PromQL (Prometheus):
           whole string typed so far is the prefix, so `job="node-ex`
           completes to `node-exporter` rather than matching nothing past
           the hyphen.
+
+                                                         *grannos-esconsole*
+Elasticsearch requests in Dev Tools mode (Kibana Console syntax) have the
+`esconsole` filetype, detected for `.esconsole` files: `METHOD /path`, then
+an optional JSON body, or several JSON lines for `_bulk`/`_msearch`. `#` and
+`//` line comments and `/* */` blocks are Console's own. The filetype is
+highlighted by its treesitter grammar — methods, endpoints, index names,
+query-string parameters, Query DSL keywords, field names and placeholders
+(|grannos-query-params-console|). A PUT, DELETE or PATCH, and a POST to
+anything but a read endpoint (`_search`, `_count`, `_query`, …), counts as a
+write for |grannos-write-protection|. There is no completion yet. A saved
+Dev Tools connection ranks first in |:DbAttach| from an `.esconsole` buffer.
 
 In Lucene (Elasticsearch in its Lucene query mode — `<index> | <query>`,
 the `lucene` filetype, detected for `.lucene` files):
@@ -1193,7 +1228,8 @@ BACKEND ~
     server started by |:DbAttach|.
 
 TREESITTER PARSERS ~
-    The `sql`, `cypher`, `promql`, `lucene` and `mongo` parsers used to
+    The `sql`, `cypher`, `promql`, `lucene`, `mongo` and `esconsole`
+    parsers used to
     find the statement and the symbol under the cursor, and to complete
     names. All ship with this plugin.
 

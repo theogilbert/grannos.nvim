@@ -9,6 +9,7 @@ describe("ftdetect", function()
   for ext, ft in pairs({
     cypher = "cypher",
     cyp    = "cypher",
+    esconsole = "esconsole",
     lucene = "lucene",
     mongo  = "mongo",
     promql = "promql",

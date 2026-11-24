@@ -29,7 +29,7 @@ M.caps_file = nil
 -- PROTOCOL_VERSION for breaking changes; bump minor for additive changes.
 -- Only major is checked for compatibility — a minor bump is guaranteed
 -- backward-compatible by convention.
-local PROTOCOL_VERSION = "1.2"
+local PROTOCOL_VERSION = "1.3"
 M.PROTOCOL_VERSION = PROTOCOL_VERSION
 
 

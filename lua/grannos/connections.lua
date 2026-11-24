@@ -643,26 +643,48 @@ end
 -- Maps protocol language identifiers (from the server's Language enum) to Vim
 -- filetypes.  This is the only place that knows about Vim-specific filetype names.
 local LANGUAGE_TO_FT = {
-  sql    = "sql",
-  cypher = "cypher",
-  promql = "promql",
-  lucene = "lucene",
-  mongo  = "mongo",
+  sql        = "sql",
+  cypher     = "cypher",
+  promql     = "promql",
+  lucene     = "lucene",
+  mongo      = "mongo",
+  es_console = "esconsole",
 }
 
---- Return the Neovim filetype of the first language `driver` declares in the
---- server capabilities, or "sql" when it declares none or is not listed.
+--- Return the languages a connection of `driver` with saved `params` speaks:
+--- the one its chosen option of a syntax-switching enum parameter names (an
+--- Elasticsearch connection's `query_mode`), else every language the driver
+--- declares. Empty when the driver is unknown or declares none.
 --- @param caps   table|nil  server capabilities (from client.capabilities)
 --- @param driver string|nil driver id
---- @return string
-function M.driver_filetype(caps, driver)
+--- @param params table|nil  the connection's saved params
+--- @return string[]
+function M.conn_languages(caps, driver, params)
   for _, d in ipairs(caps and caps.drivers or {}) do
     if d.driver == driver then
-      for _, lang in ipairs(d.languages or {}) do
-        if LANGUAGE_TO_FT[lang] then return LANGUAGE_TO_FT[lang] end
+      for _, p in ipairs(d.params or {}) do
+        local chosen = params and params[p.key]
+        if chosen == nil then chosen = p.default end
+        for _, c in ipairs(type(p.choices) == "table" and p.choices or {}) do
+          if c.value == chosen and type(c.language) == "string" then return { c.language } end
+        end
       end
-      break
+      return d.languages or {}
     end
+  end
+  return {}
+end
+
+--- Return the Neovim filetype of the first language a connection of `driver`
+--- speaks (see `conn_languages`), or "sql" when it declares none or is not
+--- listed.
+--- @param caps   table|nil  server capabilities (from client.capabilities)
+--- @param driver string|nil driver id
+--- @param params table|nil  the connection's saved params, when known
+--- @return string
+function M.driver_filetype(caps, driver, params)
+  for _, lang in ipairs(M.conn_languages(caps, driver, params)) do
+    if LANGUAGE_TO_FT[lang] then return LANGUAGE_TO_FT[lang] end
   end
   return "sql"
 end
@@ -690,18 +712,24 @@ function M.pick(caps, opts, callback)
   local active_set  = opts.active_set or {}
   local await_caps  = opts.await_caps or function(cb) cb(caps) end
 
-  -- Driver rank from caps: 1 = one of the driver's languages maps to the
-  -- current filetype, 2 = generic driver (no declared languages), 3 = a
-  -- specialty driver for a different filetype.
-  local rank_map, caps_label = {}, {}
+  -- Connection rank: 1 = one of the languages it speaks maps to the current
+  -- filetype, 2 = generic driver (no declared languages), 3 = a specialty
+  -- driver for a different filetype. Per connection rather than per driver:
+  -- an Elasticsearch connection's query mode decides its language.
+  local caps_label = {}
   for _, d in ipairs(caps.drivers or {}) do
-    local langs = d.languages or {}
-    local rank = #langs == 0 and 2 or 3
-    for _, lang in ipairs(langs) do
-      if LANGUAGE_TO_FT[lang] == opts.filetype then rank = 1; break end
-    end
-    rank_map[d.driver]   = rank
     caps_label[d.driver] = d.label or d.driver
+  end
+  --- Rank a connection of `driver` with saved `params` against the filetype.
+  --- @param driver string
+  --- @param params table
+  --- @return integer
+  local function rank_of(driver, params)
+    local langs = M.conn_languages(caps, driver, params)
+    for _, lang in ipairs(langs) do
+      if LANGUAGE_TO_FT[lang] == opts.filetype then return 1 end
+    end
+    return #langs == 0 and 2 or 3
   end
 
   local rows = {}
@@ -717,7 +745,7 @@ function M.pick(caps, opts, callback)
           driver  = driver_id,
           params  = params,
           open    = open,
-          rank    = rank_map[driver_id] or 2,
+          rank    = rank_of(driver_id, params),
           display = display,
           label   = (open and "● " or "  ") .. display .. "  (" .. label .. ")",
           hl      = key == opts.current_key and "GrannosConnection" or nil,
