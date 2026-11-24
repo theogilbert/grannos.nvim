@@ -23,15 +23,18 @@ local M = {}
 --- MongoDB queries are Extended JSON command objects; the `mongo` grammar is
 --- the JSON tree with a `statement` per command, so the extractor reads
 --- `json` too — a `.json` query file from before `.mongo` existed still
---- resolves. Elasticsearch queries are JSON as well, but describe no
---- collection or database, so the mongo extractor finds nothing in one and
---- returns nil rather than guessing.
+--- resolves. An Elasticsearch body in a `.json` file describes no collection
+--- or database, so the mongo extractor finds nothing in one and returns nil
+--- rather than guessing; Elasticsearch has its own `lucene` and `esconsole`
+--- extractors.
 local EXTRACTORS = {
   sql    = "grannos.symbols.sql",
   cypher = "grannos.symbols.cypher",
   promql = "grannos.symbols.promql",
   mongo  = "grannos.symbols.mongo",
   json   = "grannos.symbols.mongo",
+  lucene    = "grannos.symbols.lucene",
+  esconsole = "grannos.symbols.esconsole",
 }
 
 --- Describe the symbol under the cursor in `bufnr` as an explore.find query.

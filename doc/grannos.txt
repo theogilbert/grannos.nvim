@@ -731,7 +731,11 @@ highlighted by its treesitter grammar — methods, endpoints, index names,
 query-string parameters, Query DSL keywords, field names and placeholders
 (|grannos-query-params-console|). A PUT, DELETE or PATCH, and a POST to
 anything but a read endpoint (`_search`, `_count`, `_query`, …), counts as a
-write for |grannos-write-protection|. There is no completion yet. A saved
+write for |grannos-write-protection|. |grannos-hover-key| and
+|grannos-goto-symbol-key| work on the request's index or alias (the first
+path segment) and on fields in the body (keys of `match`, `term`, `range`, …,
+sort clauses and `properties`; values of `field` and `_source`). There is no
+completion yet. A saved
 Dev Tools connection ranks first in |:DbAttach| from an `.esconsole` buffer.
 
 In Lucene (Elasticsearch in its Lucene query mode — `<index> | <query>`,
@@ -754,6 +758,10 @@ the `lucene` filetype, detected for `.lucene` files):
   as a field's value
           Nothing: the mapping lists no values. A field's value, a
           phrase, a range bound and a regex offer no candidates.
+
+|grannos-hover-key| and |grannos-goto-symbol-key| work on an index or alias
+name ahead of the pipe (not a pattern) and on a field name, which is looked
+up in the indices the query names.
 
 In MongoDB (Extended JSON command objects, the `mongo` filetype, detected
 for `.mongo` files; every name is a string, so completion happens inside
