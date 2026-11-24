@@ -25,19 +25,21 @@ M.TRIGGER_CHARACTERS = { ":", "(", "," }
 --- Line-comment token, for `repair.close_open`.
 local COMMENT = "--"
 
---- Explore-tree group holding an index's fields. The Elasticsearch tree is
---- fixed — index → `mappings` → field — so the name is assumed rather than
---- discovered, as `cache.columns` assumes "columns" for SQL.
-local MAPPINGS = "mappings"
+--- Explore-tree groups. The Elasticsearch tree is fixed — `indices` →
+--- index → `mappings` → field, and `aliases` → alias — so the names are
+--- assumed rather than discovered, as `cache.columns` assumes "columns" for
+--- SQL.
+local INDICES, ALIASES, MAPPINGS = "indices", "aliases", "mappings"
 
 --- The field whose value names a field rather than a value.
 local EXISTS = "_exists_"
 
---- Index names are what every query starts with and one listing away, so
---- fetch them on attach. Fields need an index first.
+--- Index and alias names are what every query starts with and one listing
+--- away, so fetch them on attach. Fields need an index first.
 --- @param conn_id any
 function M.prime(conn_id)
-  cache.children(conn_id, {})
+  cache.children(conn_id, { INDICES })
+  cache.children(conn_id, { ALIASES })
 end
 
 --- Return the byte column where the word ending at `col` starts.
@@ -187,20 +189,24 @@ end
 
 --- Feed the candidates for `ctx` to `add`, starting any fetch it needs.
 ---
---- Fields come from the mappings of every index the query names, a pattern
---- or alias passed through as written — the server merges what it matches.
+--- A query targets indices and aliases alike, so both are offered ahead of
+--- the pipe. Fields come from the mappings of every index the query names, a
+--- pattern or alias passed through under `indices` as written — the server
+--- merges what it matches.
 --- @param conn_id  any
 --- @param ctx      LuceneCompletionContext
 --- @param add      fun(word: string, kind: string, menu: string, info: string|nil)
 --- @param on_ready fun()|nil  called once per fetch that completes
 function M.candidates(conn_id, ctx, add, on_ready)
   if ctx.kind == "index" then
-    for _, item in ipairs(cache.children(conn_id, {}, on_ready) or {}) do
-      add(item.name, "i", item.type)
+    for _, group in ipairs({ INDICES, ALIASES }) do
+      for _, item in ipairs(cache.children(conn_id, { group }, on_ready) or {}) do
+        add(item.name, "i", item.type)
+      end
     end
   else
     for _, index in ipairs(ctx.indices) do
-      for _, item in ipairs(cache.children(conn_id, { index, MAPPINGS }, on_ready) or {}) do
+      for _, item in ipairs(cache.children(conn_id, { INDICES, index, MAPPINGS }, on_ready) or {}) do
         add(item.name, "f", item.type)
       end
     end

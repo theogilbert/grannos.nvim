@@ -51,6 +51,7 @@ local TYPE_ICONS = {
   view           = "󰈈 ",
   collection     = "󱃗 ",
   index          = "󰒻 ",
+  alias          = "󰌷 ",
   constraint     = "󰌾 ",
   document       = "󰈙 ",
   bucket         = "󰆼 ",

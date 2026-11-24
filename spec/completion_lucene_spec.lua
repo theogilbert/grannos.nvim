@@ -3,21 +3,22 @@
 local requests = {}
 
 --- Canned explore.list responses, keyed by NUL-joined path, in the shape the
---- Elasticsearch driver lists: index → mappings → field, with a pattern's
---- mappings merged server-side.
+--- Elasticsearch driver lists: indices → index → mappings → field, and
+--- aliases → alias, with a pattern's mappings merged server-side.
 local TREE = {
-  [""]                       = { { name = "logs-2024.01", type = "index", expandable = true },
+  ["aliases"]                = { { name = "sales", type = "alias", expandable = true } },
+  ["indices"]                = { { name = "logs-2024.01", type = "index", expandable = true },
                                  { name = "logs-2024.02", type = "index", expandable = true },
                                  { name = "orders",       type = "index", expandable = true } },
-  ["orders\0mappings"]       = { { name = "@timestamp", type = "date" },
+  ["indices\0orders\0mappings"]       = { { name = "@timestamp", type = "date" },
                                  { name = "customer",   type = "object" },
                                  { name = "customer.name", type = "keyword" },
                                  { name = "status",     type = "keyword" },
                                  { name = "total",      type = "float" } },
-  ["logs-*\0mappings"]       = { { name = "@timestamp", type = "date" },
+  ["indices\0logs-*\0mappings"]       = { { name = "@timestamp", type = "date" },
                                  { name = "level",      type = "keyword" },
                                  { name = "message",    type = "text" } },
-  ["logs-2024.01\0mappings"] = { { name = "@timestamp", type = "date" },
+  ["indices\0logs-2024.01\0mappings"] = { { name = "@timestamp", type = "date" },
                                  { name = "level",      type = "keyword" } },
 }
 
@@ -203,10 +204,11 @@ describe("completion.omnifunc in a Lucene buffer", function()
     requests = {}
   end)
 
-  it("offers index names in an empty buffer, annotated as such", function()
+  it("offers index and alias names in an empty buffer, annotated as such", function()
     assert.same({ { word = "logs-2024.01", kind = "i", menu = "index" },
                   { word = "logs-2024.02", kind = "i", menu = "index" },
-                  { word = "orders",       kind = "i", menu = "index" } }, complete_items({ "¦" }))
+                  { word = "orders",       kind = "i", menu = "index" },
+                  { word = "sales",        kind = "i", menu = "alias" } }, complete_items({ "¦" }))
   end)
 
   it("filters index names by the typed prefix, dashes and dots included", function()
@@ -231,7 +233,7 @@ describe("completion.omnifunc in a Lucene buffer", function()
 
   it("asks the server for a pattern's mappings as written", function()
     assert.same({ "@timestamp", "level", "message" }, complete({ "logs-* | ¦" }))
-    assert.same({ "logs-*\0mappings" }, vim.tbl_filter(function(k) return k:find("mappings", 1, true) end, requests))
+    assert.same({ "indices\0logs-*\0mappings" }, vim.tbl_filter(function(k) return k:find("mappings", 1, true) end, requests))
   end)
 
   it("merges the fields of every index the query names", function()
@@ -252,7 +254,7 @@ describe("completion.omnifunc in a Lucene buffer", function()
     complete({ "orders | ¦" })
     complete({ "orders | st¦" })
     complete({ "orders | status:open AND ¦" })
-    local mappings = vim.tbl_filter(function(k) return k == "orders\0mappings" end, requests)
+    local mappings = vim.tbl_filter(function(k) return k == "indices\0orders\0mappings" end, requests)
     assert.equals(1, #mappings)
   end)
 end)

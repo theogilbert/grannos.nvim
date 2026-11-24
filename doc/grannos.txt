@@ -738,9 +738,9 @@ In Lucene (Elasticsearch in its Lucene query mode — `<index> | <query>`,
 the `lucene` filetype, detected for `.lucene` files):
 
   ahead of the pipe
-          Index names, at the start of the line and after each `,` of a
-          list. Dashes, dots and `*` are part of the word, so `logs-2024.`
-          completes to `logs-2024.01`.
+          Index and alias names, at the start of the line and after each
+          `,` of a list. Dashes, dots and `*` are part of the word, so
+          `logs-2024.` completes to `logs-2024.01`.
 
   anywhere a clause can start
           The fields of every index the query names — after the pipe, an
