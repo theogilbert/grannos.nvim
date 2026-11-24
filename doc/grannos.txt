@@ -463,6 +463,12 @@ KEYMAPS ~
 
   <CR>    Expand or collapse a node. Does nothing on non-expandable nodes.
 
+  zo      Expand the node under the cursor.
+
+  zc      Collapse the node under the cursor. On a leaf or a node already
+          collapsed, collapse the node it sits in and move the cursor onto
+          it, as |zc| closes the fold around the cursor.
+
   K       Describe the item under the cursor: fetches metadata from the
           server (column types, index fields, etc.) and displays it in a
           floating window. Press q or <Esc> to close.

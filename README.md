@@ -262,6 +262,7 @@ Press `e` on a connected database in the connections panel, or run `:DbExplore`.
 | Key | Action |
 |-----|--------|
 | `<CR>` | Expand / collapse a node |
+| `zo` / `zc` | Expand / collapse a node (`zc` on a leaf collapses its parent) |
 | `K` | Describe the item under the cursor |
 | `R` | Refresh the tree, bypassing the server-side schema cache |
 | `g?` | Show keymap reference |

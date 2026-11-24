@@ -1,5 +1,5 @@
 -- Tree-style DB explorer in a sidebar buffer.
--- Navigation: <CR> expands/collapses nodes; hover_key (default K) describes the item under cursor.
+-- Navigation: <CR> expands/collapses nodes, zo/zc expand/collapse; hover_key (default K) describes the item under cursor.
 local M = {}
 
 local Buffer         = require("grannos.buffer")
@@ -921,6 +921,32 @@ local function on_save_to_disk(st)
     end)
 end
 
+--- Handle zo: expand the node under the cursor. Does nothing when it is
+--- already open or cannot be expanded.
+--- @param st ExplorerState
+local function on_open_node(st)
+  local node = node_at_line(st, vim.api.nvim_win_get_cursor(0)[1])
+  if node and node.expandable and not node.expanded then load_children(st, node) end
+end
+
+--- Handle zc: collapse the node under the cursor, or — on a leaf or a node
+--- already closed — the node it sits in, moving the cursor onto it, as zc
+--- closes the fold around the cursor.
+--- @param st ExplorerState
+local function on_close_node(st)
+  local node = node_at_line(st, vim.api.nvim_win_get_cursor(0)[1])
+  if not node then return end
+  if not node.expanded then
+    if #node.path < 2 then return end
+    node = node_at_path(st, vim.list_slice(node.path, 1, #node.path - 1))
+    if not node then return end
+  end
+  node.expanded = false
+  render(st)
+  local line = line_of_node(st, node)
+  if line then vim.api.nvim_win_set_cursor(0, { line, 0 }) end
+end
+
 --- Create the explorer Buffer (with keymaps) if it doesn't exist or has been wiped.
 --- @param st ExplorerState
 local function get_or_create_buffer(st)
@@ -928,6 +954,10 @@ local function get_or_create_buffer(st)
   st.buffer = Buffer:new(BUFNAME .. "/" .. st.id, "grannos_explorer", false, "nofile")
   st.buffer:set_keymap("n", "<CR>", function() on_enter(st) end,
     { nowait = true, silent = true, desc = "Expand / collapse node" })
+  st.buffer:set_keymap("n", "zo", function() on_open_node(st) end,
+    { nowait = true, silent = true, desc = "Expand node" })
+  st.buffer:set_keymap("n", "zc", function() on_close_node(st) end,
+    { nowait = true, silent = true, desc = "Collapse node (or its parent)" })
   st.buffer:set_keymap("n", config.options.keymaps.hover_key, function() on_describe(st) end,
     { nowait = true, silent = true, desc = "Describe item" })
   st.buffer:set_keymap("n", "r", function()
