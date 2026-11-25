@@ -213,46 +213,10 @@ local function scroll_columns(direction)
   local win_id = vim.api.nvim_get_current_win()
   local buf_state = win_buf_state_for(win_id)
   if not buf_state or not buf_state.table_data then return end
-  local boundaries = table_fmt.column_boundaries(buf_state.table_data.columns_width)
-
-  local leftcol
-  vim.api.nvim_win_call(win_id, function()
-    leftcol = vim.fn.winsaveview().leftcol
-  end)
-
-  local target = leftcol
-  if direction > 0 then
-    local win_width = vim.api.nvim_win_get_width(win_id)
-    for i, b in ipairs(boundaries) do
-      if i == #boundaries then break end
-      if b > leftcol then
-        local new_target = math.max(0, boundaries[i + 1] - win_width + 1)
-        if new_target > leftcol then target = new_target break end
-      end
-    end
-  else
-    target = 0
-    for _, b in ipairs(boundaries) do
-      if b < leftcol then target = b end
-    end
-  end
-
-  if target ~= leftcol then
-    vim.api.nvim_win_call(win_id, function()
-      local cursor_vcol = vim.fn.virtcol(".")
-      local new_vcol    = math.max(1, target + cursor_vcol - leftcol)
-      local row         = vim.fn.line(".")
-      -- A line that doesn't reach the new column (the row-count label, a blank
-      -- line, a message) can't hold the cursor there, and Neovim would scroll
-      -- back to wherever it did land: carry it onto the table's header row.
-      if vim.fn.virtcol({ row, "$" }) <= new_vcol then
-        row = (buf_state.table_start or 2) + 1
-      end
-      local byte_col    = math.max(0, vim.fn.virtcol2col(0, row, new_vcol) - 1)
-      vim.api.nvim_win_set_cursor(0, { row, byte_col })
-      vim.fn.winrestview({ leftcol = target })
-    end)
-  end
+  -- A line that doesn't reach the new column (the row-count label, a blank
+  -- line, a message) can't hold the cursor: carry it onto the header row.
+  require("common.grid").scroll(win_id, buf_state.table_data.columns_width, direction,
+    { row = (buf_state.table_start or 2) + 1 })
 end
 
 
@@ -275,36 +239,9 @@ local function update_truncation_indicators(win_id)
   if not win_id or not vim.api.nvim_win_is_valid(win_id) then return end
   local buf_state = win_buf_state_for(win_id)
   if not buf_state then return end
-  local buf_id = buf_state.buffer.buf_id
-  vim.api.nvim_buf_clear_namespace(buf_id, hl.TRUNCATION_NS_ID, 0, -1)
-
-  if not buf_state.table_data then return end
-  local boundaries = table_fmt.column_boundaries(buf_state.table_data.columns_width)
-
-  local win_width = vim.api.nvim_win_get_width(win_id)
-  local leftcol = 0
-  vim.api.nvim_win_call(win_id, function()
-    leftcol = vim.fn.winsaveview().leftcol
-  end)
-
-  local trunc_right = boundaries[#boundaries] >= leftcol + win_width
-  local trunc_left  = leftcol > 0
-  if not trunc_right and not trunc_left then return end
-
-  for row = 0, vim.api.nvim_buf_line_count(buf_id) - 1 do
-    if trunc_right then
-      vim.api.nvim_buf_set_extmark(buf_id, hl.TRUNCATION_NS_ID, row, 0, {
-        virt_text = { { "▸", "GrannosTruncated" } },
-        virt_text_pos = "right_align",
-      })
-    end
-    if trunc_left then
-      vim.api.nvim_buf_set_extmark(buf_id, hl.TRUNCATION_NS_ID, row, 0, {
-        virt_text         = { { "◂", "GrannosTruncated" } },
-        virt_text_win_col = 0,
-      })
-    end
-  end
+  require("common.grid").indicators(buf_state.buffer.buf_id, win_id,
+    buf_state.table_data and buf_state.table_data.columns_width,
+    { ns = hl.TRUNCATION_NS_ID, hl = "GrannosTruncated" })
 end
 
 
