@@ -1,5 +1,8 @@
 -- Formats a sequence of row arrays into a box-drawing-character table.
--- Adapted from utilities/table.lua (nvim-dap-df project) — CSV parsing removed.
+-- The values (NULL, LOBs, numbers with separators) are grannos's; the layout
+-- and geometry are common.grid's.
+local grid = require("common.grid")
+
 local M = {}
 
 --- @class FormattedTable
@@ -10,7 +13,7 @@ local M = {}
 --- @field decimal_sep   string|nil decimal-point separator used for numeric cells, if any
 --- @field left_aligned  table<integer, boolean> columns whose cells are left-aligned rather than centered
 
-M.COL_SEPARATOR = "│"
+M.COL_SEPARATOR = grid.SEP
 
 -- Row count between cooperative yields in from_structured_data's per-row loops
 -- below. Only takes effect inside a coroutine driven by e.g. export.run_async;
@@ -78,27 +81,9 @@ local function format_number(n, sep, decimal_sep)
   return int_str .. frac, #int_str
 end
 
---- Printable stand-ins for the control characters that turn up in real cell
---- values (a traceback, a JSON blob, an indented text column).
-local CONTROL_ESCAPES = { ["\n"] = "\\n", ["\r"] = "\\r", ["\t"] = "\\t" }
-
---- Replace control characters in `s` with their source-literal escapes, so a
---- multi-line value renders as one line of one row.
----
---- A cell is one line of a box-drawn row: an embedded newline either splits the
---- row or (as in the results pane, which strips them before writing the buffer)
---- disappears, and either way the row stops lining up with the header, because
---- the width the layout reserved counted a character that is no longer there.
---- Escaping happens here, ahead of both the width measurement and the render,
---- so the two always agree on what a cell looks like.
---- @param s string
---- @return string
-local function escape_control(s)
-  if not s:find("%c") then return s end
-  return (s:gsub("%c", function(c)
-    return CONTROL_ESCAPES[c] or ("\\x%02X"):format(c:byte())
-  end))
-end
+--- Control characters written as escapes, so a multi-line value renders as
+--- one line of one row (see common.grid.escape).
+local escape_control = grid.escape
 
 --- Return the display string for a cell value, mapping vim.NIL → "NULL", a
 --- LobPlaceholder/SpecialFloat object → its server-formatted `text`, and formatting
@@ -121,47 +106,8 @@ local function cell_display(cell, sep, decimal_sep)
   return escape_control(tostring(cell))
 end
 
---- Center `text` within `width` display columns using space padding.
---- @param text  string
---- @param width integer
---- @return string
-local function center(text, width)
-  local space = (width - vim.api.nvim_strwidth(text)) / 2
-  return string.rep(" ", math.floor(space)) .. text .. string.rep(" ", math.ceil(space))
-end
-
---- Left-align `text` within `width` display columns, keeping the 1-space padding on the left.
---- @param text  string
---- @param width integer
---- @return string
-local function left(text, width)
-  return " " .. text .. string.rep(" ", width - vim.api.nvim_strwidth(text) - 1)
-end
-
 --- Display-column offset of `text` from the start of its cell.
---- @param text    string
---- @param width   integer  the cell's width
---- @param is_left boolean  whether the cell is left-aligned
---- @return integer
-local function text_offset(text, width, is_left)
-  if is_left then return 1 end
-  return math.floor((width - vim.api.nvim_strwidth(text)) / 2)
-end
-
---- Expand `widths[i]` to fit the display width of each cell in `cols` (with 1-space padding each side).
---- Runs over `ncols` rather than the row's own length, so a row that is missing
---- trailing cells still reserves a width for them.
---- @param cols        table    array of cell values
---- @param widths      integer[]  mutable column-width array
---- @param ncols       integer  number of columns the table renders
---- @param sep         string[]|nil per-column thousands-separator, indexed like `cols`, or nil to disable
---- @param decimal_sep string|nil decimal-point separator, or nil for "."
-local function update_col_widths(cols, widths, ncols, sep, decimal_sep)
-  for i = 1, ncols do
-    widths[i] = math.max(widths[i] or 2,
-      vim.api.nvim_strwidth(cell_display(cols[i], sep and sep[i], decimal_sep)) + 2)
-  end
-end
+local text_offset = grid.offset
 
 --- Normalize a `sep` argument into a per-column array (or nil when disabled everywhere).
 --- Accepts a single string (applied uniformly to every column, for callers that don't
@@ -184,13 +130,16 @@ local function normalize_sep(sep, ncols)
   return any and arr or nil
 end
 
---- Build the ├──┼──┤ separator row for the given column widths.
---- @param widths integer[]
---- @return string
-local function build_separator(widths)
-  local parts = {}
-  for i, w in ipairs(widths) do parts[i] = string.rep("─", w) end
-  return "├" .. table.concat(parts, "┼") .. "┤"
+--- The display strings of `row`'s first `ncols` cells.
+--- @param row         table
+--- @param ncols       integer
+--- @param sep         string[]|nil
+--- @param decimal_sep string|nil
+--- @return string[]
+local function display_row(row, ncols, sep, decimal_sep)
+  local out = {}
+  for j = 1, ncols do out[j] = cell_display(row and row[j], sep and sep[j], decimal_sep) end
+  return out
 end
 
 --- Build a FormattedTable from a list of row arrays.
@@ -214,31 +163,13 @@ function M.from_structured_data(lines, header_lines, sep, decimal_sep, left_alig
   local ncols = 0
   for _, row in ipairs(lines) do ncols = math.max(ncols, #row) end
   sep = normalize_sep(sep, ncols)
-  local widths = {}
+  local display = {}
   for i, row in ipairs(lines) do
-    update_col_widths(row, widths, ncols, sep, decimal_sep)
+    display[i] = display_row(row, ncols, sep, decimal_sep)
     maybe_yield(i)
   end
-
-  local left_aligned = {}
-  if left_align_width then
-    for j = 1, ncols do left_aligned[j] = widths[j] > left_align_width or nil end
-  end
-
-  local formatted = {}
-  for i, row in ipairs(lines) do
-    local cells = {}
-    for j = 1, ncols do
-      local align = left_aligned[j] and left or center
-      cells[j] = align(cell_display(row[j], sep and sep[j], decimal_sep), widths[j])
-    end
-    table.insert(formatted, M.COL_SEPARATOR .. table.concat(cells, M.COL_SEPARATOR) .. M.COL_SEPARATOR)
-    maybe_yield(i)
-  end
-
-  if header_lines > 0 and header_lines <= #formatted then
-    table.insert(formatted, header_lines + 1, build_separator(widths))
-  end
+  local laid = grid.layout(display, { header = header_lines, left_align = left_align_width })
+  local widths, formatted, left_aligned = laid.widths, laid.text, laid.left
 
   return { lines = lines, columns_width = widths, text = formatted, sep = sep, decimal_sep = decimal_sep,
            left_aligned = left_aligned }
@@ -249,30 +180,14 @@ end
 --- @param cols_width integer[]
 --- @param virtual_col integer  1-indexed
 --- @return integer|nil
-function M.get_column_at_cursor(cols_width, virtual_col)
-  local pos = 2  -- skip leading │
-  for i, w in ipairs(cols_width) do
-    if virtual_col >= pos and virtual_col < pos + w then return i end
-    pos = pos + w + 1
-  end
-  return nil
-end
-
-local SEP_BYTES = #M.COL_SEPARATOR
+M.get_column_at_cursor = grid.column_at
 
 --- Return the virtual-column positions of each column boundary (left edge of
 --- the leading separator + each trailing separator).  The first entry is always
 --- 0 (left edge of the table); the last is the right edge.
 --- @param cols_width integer[]
 --- @return integer[]
-function M.column_boundaries(cols_width)
-  local boundaries, pos = { 0 }, 0
-  for _, w in ipairs(cols_width) do
-    pos = pos + w + 1  -- cell width + │
-    boundaries[#boundaries + 1] = pos
-  end
-  return boundaries
-end
+M.column_boundaries = grid.boundaries
 
 --- Compute the byte {start, finish} of each column cell in a formatted line.
 --- Accounts for multi-byte cell content so positions are valid for vim.hl.range.
@@ -282,20 +197,7 @@ end
 --- @param decimal_sep string|nil  decimal-point separator in effect, or nil
 --- @return table   list of {byte_start, byte_end} per column
 function M.column_byte_positions(row, cols_width, sep, decimal_sep)
-  local positions = {}
-  local byte_pos  = SEP_BYTES  -- skip leading │
-  for i, width in ipairs(cols_width) do
-    local cell_bytes
-    if row then
-      local s    = cell_display(row[i], sep and sep[i], decimal_sep)
-      cell_bytes = width - vim.api.nvim_strwidth(s) + #s
-    else
-      cell_bytes = width
-    end
-    positions[i] = { byte_pos, byte_pos + cell_bytes }
-    byte_pos     = byte_pos + cell_bytes + SEP_BYTES
-  end
-  return positions
+  return grid.spans(row and display_row(row, #cols_width, sep, decimal_sep), cols_width)
 end
 
 --- Build per-column highlight rules for one buffer line.
