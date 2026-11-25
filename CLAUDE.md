@@ -43,7 +43,7 @@ grannos.nvim is a Neovim database-client plugin that delegates all database work
 | `lua/grannos/ui/conn_picker.lua` | Single-pane search-and-list float over caller-supplied rows; `connections.pick` builds the saved-connection rows for `:DbAttach` |
 | `lua/grannos/ui/query_picker.lua` | Saved-query picker (fzf-lua or `vim.ui.select`) |
 | `lua/grannos/ui/save_query.lua` | Save-query wizard |
-| `lua/grannos/ui/col_picker.lua` | Column-visibility picker for the results panel |
+| `lua/grannos/ui/col_picker.lua` | Column-visibility picker for the results panel: `common.columns` in grannos colours |
 | `lua/grannos/ui/detail_pane.lua` | Shared two-pane and single-item detail float infrastructure |
 | `lua/grannos/ui/indices.lua` | Index-description float (uses detail_pane) |
 | `lua/grannos/ui/column.lua` | Column-description float (uses detail_pane) |
