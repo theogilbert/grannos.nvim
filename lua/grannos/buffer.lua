@@ -60,94 +60,26 @@ function Buffer:close()
 end
 
 --- Open a floating window listing `keymaps`. Keymaps with a non-empty `group`
---- are rendered under section headers. Closes on q/<Esc>/g?.
+--- are rendered under section headers. Closes on q/<Esc>/g?/<C-h>.
 --- Shared by Buffer:show_help and any other keymap-tracking UI that isn't
 --- built on a Buffer instance (e.g. detail_pane's floating panes).
 --- @param keymaps { lhs: string, desc: string, group: string }[]
 --- @return integer|nil win  the help float's window id, or nil if there was nothing to show
 function Buffer.render_help_float(keymaps)
-  if #keymaps == 0 then return nil end
-
-  local has_groups = false
+  local rows = {}
   for _, km in ipairs(keymaps) do
-    if km.group ~= "" then has_groups = true; break end
+    rows[#rows + 1] = { key = km.lhs, desc = km.desc, group = km.group }
   end
-
-  local key_w = 0
-  for _, km in ipairs(keymaps) do
-    key_w = math.max(key_w, vim.fn.strdisplaywidth(km.lhs))
-  end
-
-  local lines, header_lnums = {}, {}
-
-  if has_groups then
-    local group_order, buckets, seen = {}, {}, {}
-    for _, km in ipairs(keymaps) do
-      local g = km.group ~= "" and km.group or "\0ungrouped"
-      if not seen[g] then seen[g] = true; table.insert(group_order, g) end
-      if not buckets[g] then buckets[g] = {} end
-      table.insert(buckets[g], km)
-    end
-
-    for i, g in ipairs(group_order) do
-      if i > 1 then table.insert(lines, "") end
-      if g ~= "\0ungrouped" then
-        table.insert(lines, g)
-        header_lnums[#lines] = true
-      end
-      for _, km in ipairs(buckets[g]) do
-        local pad = string.rep(" ", key_w - vim.fn.strdisplaywidth(km.lhs))
-        table.insert(lines, ("  %s%s  %s"):format(km.lhs, pad, km.desc))
-      end
-    end
-  else
-    for _, km in ipairs(keymaps) do
-      local pad = string.rep(" ", key_w - vim.fn.strdisplaywidth(km.lhs))
-      table.insert(lines, ("  %s%s  %s"):format(km.lhs, pad, km.desc))
-    end
-  end
-
-  local width = 1
-  for _, l in ipairs(lines) do width = math.max(width, vim.fn.strdisplaywidth(l)) end
-
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  vim.bo[buf].modifiable = false
-  vim.bo[buf].bufhidden  = "wipe"
-
-  for lnum in pairs(header_lnums) do
-    vim.hl.range(buf, hl.NS_ID, "GrannosHeaderRow", { lnum - 1, 0 }, { lnum - 1, -1 })
-  end
-
-  -- A caller may trigger this from insert mode (e.g. detail_pane's <C-h> is
-  -- bound in the search box). Leave insert mode first: mode is global, not
-  -- per-window, so staying in it would make the next keystroke try (and fail)
-  -- to edit this read-only buffer instead of being a normal-mode command.
-  vim.cmd("stopinsert")
-
-  local win = vim.api.nvim_open_win(buf, true, {
-    relative  = "cursor",
-    row       = 1,
-    col       = 0,
-    width     = width,
-    height    = #lines,
-    style     = "minimal",
-    border    = "rounded",
-    title     = " keymaps ",
-    title_pos = "center",
+  return require("common.help").float(rows, {
+    at     = "cursor",
+    title  = " keymaps ",
+    close  = { "g?", "<C-h>" },
+    hl     = { head = "GrannosHeaderRow" },
+    win_ns = hl.NS_ID,
     -- Above any of the plugin's own floats (detail_pane's list window uses
-    -- zindex=51 for its stitched-border trick), so the help float always
-    -- renders on top rather than behind them.
-    zindex    = 200,
+    -- zindex=51 for its stitched-border trick).
+    zindex = 200,
   })
-  vim.api.nvim_win_set_hl_ns(win, hl.NS_ID)
-
-  for _, key in ipairs({ "q", "<Esc>", "g?", "<C-h>" }) do
-    vim.keymap.set("n", key, function() pcall(vim.api.nvim_win_close, win, true) end,
-      { buffer = buf, silent = true })
-  end
-
-  return win
 end
 
 --- Open a floating window listing all keymaps that have a desc.

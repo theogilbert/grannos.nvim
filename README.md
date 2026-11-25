@@ -4,7 +4,8 @@ A Neovim database client. Communicates with an external server backend over newl
 
 ## Requirements
 
-- Neovim 0.9+
+- Neovim 0.10+
+- [common.nvim](../common.nvim), the UI library shared by the author's plugins (help floats, tables, the column picker), on the runtimepath
 - A server backend implementing the [grannos protocol](docs/protocol.md)
 
 [grannos-py](https://github.com/theogilbert/grannos-py) is a reference server implementation.
