@@ -9,3 +9,18 @@
 -- silently testing a mix of two versions.
 local root = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h")
 vim.opt.runtimepath:prepend(root)
+
+-- common.nvim, the UI library grannos is built on: where it was asked
+-- for (GRANNOS_COMMON), else a checkout beside this one -- the copy
+-- being worked on, when both are -- else whatever is installed, which
+-- the runtimepath already holds.
+local common = vim.env.GRANNOS_COMMON
+if not common then
+  for _, dir in ipairs({ root .. "/../common.nvim", root .. "/../../common.nvim" }) do
+    if vim.fn.isdirectory(dir .. "/lua/common") == 1 then
+      common = vim.fn.fnamemodify(dir, ":p")
+      break
+    end
+  end
+end
+if common then vim.opt.runtimepath:append(common) end
