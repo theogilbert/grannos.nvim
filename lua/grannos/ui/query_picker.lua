@@ -152,13 +152,9 @@ local function show_picker(entries_data, conn_key)
           local sk, name = decode_entry(selected[1])
           if not sk then return end
           vim.schedule(function()
-            vim.ui.select({ "No", "Yes" }, {
-              prompt = ('Delete query %q?'):format(name),
-            }, function(choice)
-              if choice == "Yes" then
-                queries.delete(sk, name)
-                vim.notify(('grannos: deleted "%s"'):format(name), vim.log.levels.INFO)
-              end
+            require("common.pick").confirm(('Delete query %q?'):format(name), function()
+              queries.delete(sk, name)
+              vim.notify(('grannos: deleted "%s"'):format(name), vim.log.levels.INFO)
             end)
           end)
         end,

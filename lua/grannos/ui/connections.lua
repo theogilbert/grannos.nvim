@@ -10,6 +10,7 @@ local config      = require("grannos.config")
 local hl          = require("grannos.hl")
 local window      = require("grannos.ui.window")
 local Spinner     = require("grannos.ui.spinner")
+local pick        = require("common.pick")
 
 local BUFNAME     = "grannos://connections"
 local ACTIVE_MARK = " ✓"
@@ -186,13 +187,11 @@ local function on_delete()
   local entry = entry_at_cursor()
   if not entry then return end
   if entry.type == "conn" then
-    vim.ui.select({ "No", "Yes" }, {
-      prompt = ('Delete connection %q?'):format(connections.conn_display_name(entry.key)),
-    }, function(choice)
-      if choice ~= "Yes" then return end
-      connections.delete(entry.key)
-      refresh()
-    end)
+    pick.confirm(('Delete connection %q?'):format(connections.conn_display_name(entry.key)),
+      function()
+        connections.delete(entry.key)
+        refresh()
+      end)
   elseif entry.type == "subgroup" then
     local caps   = require("grannos.client").capabilities()
     local server = caps and (caps.server or "") or ""
@@ -200,10 +199,7 @@ local function on_delete()
     local count  = vim.tbl_count(
       (((connections.load(server)[entry.driver] or {}).groups or {})[entry.group] or {})
     )
-    vim.ui.select({ "No", "Yes" }, {
-      prompt = ('Delete group %q and its %d connection(s)?'):format(label, count),
-    }, function(choice)
-      if choice ~= "Yes" then return end
+    pick.confirm(('Delete group %q and its %d connection(s)?'):format(label, count), function()
       connections.delete_group(server, entry.driver, entry.group)
       refresh()
     end)
