@@ -96,20 +96,7 @@ end
 local STATEMENT_TINT  = 0x98C379
 local STATEMENT_BLEND = 0.1
 
---- Return the colour `t` of the way from `a` to `b` (24-bit RGB integers).
---- @param a integer
---- @param b integer
---- @param t number  0 = a, 1 = b
---- @return integer
-local function blend(a, b, t)
-  local out = 0
-  for shift = 16, 0, -8 do
-    local ca = bit.band(bit.rshift(a, shift), 0xFF)
-    local cb = bit.band(bit.rshift(b, shift), 0xFF)
-    out = out + bit.lshift(math.floor(ca + (cb - ca) * t + 0.5), shift)
-  end
-  return out
-end
+local blend = require("common.hl").mix
 
 --- Return the definition of GrannosStatementCursor: Normal's background with
 --- a green tint, or a link to CursorLine when Normal has no background (a
@@ -159,10 +146,10 @@ local function setup_highlights()
   vim.api.nvim_set_hl(0, "GrannosConnFormEdit",        { bg = EDIT_BG,    default = true })
 end
 
---- Initialize namespaces, define highlights, and register a ColorScheme autocmd.
+--- Initialize namespaces, define highlights, and define them again after
+--- every colorscheme (common.hl.watch: once, however often setup runs).
 function M.setup()
-  setup_highlights()
-  vim.api.nvim_create_autocmd("ColorScheme", { callback = setup_highlights })
+  require("common.hl").watch("grannos", setup_highlights)
 end
 
 return M
