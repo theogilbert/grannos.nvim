@@ -21,6 +21,8 @@ M.file = nil
 --- @type table|nil
 local cache = nil
 
+local store = require("common.store")
+
 --- Return the path of the JSON store file.
 --- @return string
 local function file_path()
@@ -32,26 +34,14 @@ end
 --- Read the store from disk (once per session) and cache it.
 --- @return table
 local function load_store()
-  if cache then return cache end
-  cache = {}
-  local f = io.open(file_path(), "r")
-  if f then
-    local content = f:read("*a")
-    f:close()
-    local ok, decoded = pcall(vim.json.decode, content)
-    if ok and type(decoded) == "table" then cache = decoded end
-  end
+  if not cache then cache = store.read(file_path()) end
   return cache
 end
 
---- Write the cached store to disk, creating its directory if needed.
+--- Write the cached store to disk (common.store: directory made, written
+--- aside and moved into place).
 local function write_store()
-  local path = file_path()
-  vim.fn.mkdir(vim.fn.fnamemodify(path, ":h"), "p")
-  local f = io.open(path, "w")
-  if not f then return end
-  f:write(vim.json.encode(load_store()))
-  f:close()
+  store.write(file_path(), load_store())
 end
 
 --- Return the group table holding `key`'s entry, creating intermediate

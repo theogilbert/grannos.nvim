@@ -268,12 +268,7 @@ end
 --- @param cmd  string
 --- @param caps table
 local function save_caps_snapshot(cmd, caps)
-  local path = caps_file_path()
-  vim.fn.mkdir(vim.fn.fnamemodify(path, ":h"), "p")
-  local f = io.open(path, "w")
-  if not f then return end
-  f:write(vim.json.encode({ server_cmd = cmd, caps = caps }))
-  f:close()
+  require("common.store").write(caps_file_path(), { server_cmd = cmd, caps = caps })
 end
 
 --- Return the capabilities the backend reported the last time one started with
@@ -283,12 +278,8 @@ end
 --- @param cmd string  shell command the backend is launched with
 --- @return table|nil
 function M.capabilities_snapshot(cmd)
-  local f = io.open(caps_file_path(), "r")
-  if not f then return nil end
-  local content = f:read("*a")
-  f:close()
-  local ok, decoded = pcall(vim.json.decode, content)
-  if not ok or type(decoded) ~= "table" or decoded.server_cmd ~= cmd or type(decoded.caps) ~= "table" then
+  local decoded = require("common.store").read(caps_file_path())
+  if decoded.server_cmd ~= cmd or type(decoded.caps) ~= "table" then
     return nil
   end
   return strip_nil(decoded.caps)

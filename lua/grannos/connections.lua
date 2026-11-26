@@ -101,10 +101,9 @@ end
 --- Serialise `data` to the connections file and update the cache.
 --- @param data table
 local function write_data(data)
-  local path = file_path()
-  vim.fn.mkdir(vim.fn.fnamemodify(path, ":h"), "p")
-  vim.fn.writefile({ vim.json.encode(data) }, path)
-  vim.uv.fs_chmod(path, tonumber("600", 8))
+  -- 0600, and written aside then moved into place: a write cut short must not
+  -- leave a half file, which `read_data` would refuse as corrupted.
+  require("common.store").write(file_path(), data)
   _cache = data
 end
 
