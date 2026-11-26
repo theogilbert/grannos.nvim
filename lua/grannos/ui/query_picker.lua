@@ -1,6 +1,7 @@
 local M = {}
 
 local queries = require("grannos.queries")
+local notify = require("grannos.notify")
 
 local SEP     = "\t"
 local KEY_SEP = "\1"   -- SOH: won't appear in scope keys or query names
@@ -112,7 +113,7 @@ end
 --- @param conn_key     string|nil  associated connection for the opened buffer
 local function show_picker(entries_data, conn_key)
   if #entries_data == 0 then
-    vim.notify("grannos: no saved queries", vim.log.levels.INFO)
+    notify.info("no saved queries")
     return
   end
 
@@ -154,7 +155,7 @@ local function show_picker(entries_data, conn_key)
           vim.schedule(function()
             require("common.pick").confirm(('Delete query %q?'):format(name), function()
               queries.delete(sk, name)
-              vim.notify(('grannos: deleted "%s"'):format(name), vim.log.levels.INFO)
+              notify.info(('deleted "%s"'):format(name))
             end)
           end)
         end,

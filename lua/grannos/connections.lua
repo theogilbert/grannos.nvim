@@ -18,6 +18,7 @@
 local M = {}
 
 local config = require("grannos.config")
+local notify = require("grannos.notify")
 
 local _cache = nil  -- cached parsed file contents; nil means not yet loaded
 
@@ -86,11 +87,10 @@ local function read_data()
   if not ok or #lines == 0 then _cache = {}; return _cache end
   local ok2, parsed = pcall(vim.json.decode, table.concat(lines, "\n"))
   if not ok2 or type(parsed) ~= "table" then
-    vim.notify(
-      "grannos: connections file is corrupted and could not be loaded.\n"
+    notify.error(
+      "connections file is corrupted and could not be loaded.\n"
       .. "  Path: " .. path .. "\n"
-      .. "  Fix or remove it to continue.",
-      vim.log.levels.ERROR
+      .. "  Fix or remove it to continue."
     )
     return nil
   end
@@ -203,14 +203,14 @@ function M.delete(key)
   local d    = (data[server] or {})[driver]
   local g    = d and (d.groups or {})[group]
   if not g or not g[name] then
-    vim.notify(("grannos: connection %q not found"):format(name), vim.log.levels.WARN)
+    notify.warn(("connection %q not found"):format(name))
     return
   end
   g[name] = nil
   write_data(data)
   require("grannos.session_params").delete(key)  -- lazy: session_params requires this module
   require("grannos.col_selection").delete(key)
-  vim.notify(("grannos: deleted connection %q"):format(name), vim.log.levels.INFO)
+  notify.info(("deleted connection %q"):format(name))
 end
 
 --- Delete an entire group and all its connections.
@@ -222,7 +222,7 @@ function M.delete_group(server, driver, group)
   if not data then return end
   local d = (data[server] or {})[driver]
   if not d or not (d.groups or {})[group] then
-    vim.notify(("grannos: group %q not found"):format(group), vim.log.levels.WARN)
+    notify.warn(("group %q not found"):format(group))
     return
   end
   local count = vim.tbl_count(d.groups[group])
@@ -231,7 +231,7 @@ function M.delete_group(server, driver, group)
   require("grannos.session_params").delete_group(server, driver, group)
   require("grannos.col_selection").delete_group(server, driver, group)
   local label = group ~= "" and group or "(no group)"
-  vim.notify(("grannos: deleted group %q and %d connection(s)"):format(label, count), vim.log.levels.INFO)
+  notify.info(("deleted group %q and %d connection(s)"):format(label, count))
 end
 
 --- Create an empty named group for a driver.
@@ -251,7 +251,7 @@ function M.create_group(server, driver, driver_label, group_name)
   local d = data[server][driver]
   d.groups = d.groups or {}
   if d.groups[group_name] ~= nil then
-    vim.notify(("grannos: group %q already exists"):format(group_name), vim.log.levels.WARN)
+    notify.warn(("group %q already exists"):format(group_name))
     return false
   end
   d.groups[group_name] = {}
@@ -839,7 +839,7 @@ function M.create(caps, callback, defaults)
         if not data2 then done("failed to read the connections file"); return end
         upsert(data2, server, driver, driver_label, group, name, params)
         write_data(data2)
-        vim.notify(("grannos: saved %q"):format(name), vim.log.levels.INFO)
+        notify.info(("saved %q"):format(name))
         local out = (pw ~= nil and pw ~= "")
           and vim.tbl_extend("force", params, { [pw_key] = pw }) or params
         done(nil)
@@ -874,7 +874,7 @@ function M.edit(key, caps, callback)
   local server, driver, group, name = M.conn_parts(key)
   local current = M.get(key)
   if not current then
-    vim.notify(("grannos: connection %q not found"):format(name), vim.log.levels.ERROR)
+    notify.error(("connection %q not found"):format(name))
     callback(nil)
     return
   end
@@ -926,7 +926,7 @@ function M.edit(key, caps, callback)
       write_data(data2)
       require("grannos.session_params").rename(key, new_key)
       require("grannos.col_selection").rename(key, new_key)
-      vim.notify(("grannos: saved %q"):format(new_name), vim.log.levels.INFO)
+      notify.info(("saved %q"):format(new_name))
       local final = (pw ~= nil and pw ~= "")
         and vim.tbl_extend("force", params, { [pw_key] = pw }) or params
       done(nil)
@@ -946,7 +946,7 @@ function M.clone(source_key, new_name, caps, callback)
   local server, driver, group = M.conn_parts(source_key)
   local current = M.get(source_key)
   if not current then
-    vim.notify(("grannos: connection %q not found"):format(M.conn_display_name(source_key)), vim.log.levels.ERROR)
+    notify.error(("connection %q not found"):format(M.conn_display_name(source_key)))
     callback(nil)
     return
   end
@@ -989,7 +989,7 @@ function M.clone(source_key, new_name, caps, callback)
       if not data2 then done("failed to read the connections file"); return end
       upsert(data2, server, driver, driver_label, new_group, name, params)
       write_data(data2)
-      vim.notify(("grannos: saved %q"):format(name), vim.log.levels.INFO)
+      notify.info(("saved %q"):format(name))
       local final = (pw ~= nil and pw ~= "")
         and vim.tbl_extend("force", params, { [pw_key] = pw }) or params
       done(nil)

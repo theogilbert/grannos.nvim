@@ -11,6 +11,7 @@ local hl          = require("grannos.hl")
 local window      = require("grannos.ui.window")
 local Spinner     = require("grannos.ui.spinner")
 local pick        = require("common.pick")
+local notify = require("grannos.notify")
 
 local BUFNAME     = "grannos://connections"
 local ACTIVE_MARK = " ✓"
@@ -297,7 +298,7 @@ local function on_jump()
   local db   = require("grannos")
   local bufs = db.buffers_for(entry.key)
   if #bufs == 0 then
-    vim.notify("grannos: no buffers associated with " .. connections.conn_display_name(entry.key), vim.log.levels.WARN)
+    notify.warn("no buffers associated with " .. connections.conn_display_name(entry.key))
     return
   end
   local panel_win = vim.fn.bufwinid(state.buffer.buf_id)

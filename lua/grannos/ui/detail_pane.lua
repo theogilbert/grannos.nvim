@@ -6,6 +6,7 @@ local M = {}
 local hl         = require("grannos.hl")
 local Buffer     = require("grannos.buffer")
 local client     = require("grannos.client")
+local notify = require("grannos.notify")
 
 --- Positional highlight entry: { group, 0-indexed-row, byte-col-start, byte-col-end }.
 --- Used in the `hls` accumulator arrays passed between section/tag_line/apply.
@@ -584,7 +585,7 @@ function M.open_searchable_two_pane(opts)
 
   local items = opts.items
   if #items == 0 then
-    vim.notify("grannos: nothing to display", vim.log.levels.WARN)
+    notify.warn("nothing to display")
     return
   end
 
@@ -679,7 +680,7 @@ function M.open_searchable_two_pane(opts)
       vim.schedule(function()
         refreshing = false
         if err then
-          vim.notify("grannos: " .. err, vim.log.levels.ERROR)
+          notify.error(err)
           return
         end
         if opts.apply_refresh then
@@ -811,7 +812,7 @@ function M.open_single(opts)
           if not vim.api.nvim_win_is_valid(win) then return end
           if err then
             pcall(vim.api.nvim_win_set_config, win, { title = base_title })
-            vim.notify("grannos: " .. err, vim.log.levels.ERROR)
+            notify.error(err)
             return
           end
           opts.item = details

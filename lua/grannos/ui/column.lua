@@ -5,6 +5,7 @@
 local M = {}
 
 local pane = require("grannos.ui.detail_pane")
+local notify = require("grannos.notify")
 local ICON = "󰠵 "
 local ARROW = "  →  "
 
@@ -157,7 +158,7 @@ end
 function M.open(details, title, conn_id, group_path)
   local columns = type(details.properties) == "table" and details.properties or {}
   if #columns == 0 then
-    vim.notify("grannos: no columns found", vim.log.levels.WARN)
+    notify.warn("no columns found")
     return
   end
   pane.open_searchable_two_pane({

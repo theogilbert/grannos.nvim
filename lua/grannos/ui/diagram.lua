@@ -4,6 +4,7 @@ local M = {}
 local client = require("grannos.client")
 local config = require("grannos.config")
 local hl     = require("grannos.hl")
+local notify = require("grannos.notify")
 
 local NS_ID = vim.api.nvim_create_namespace("GrannosDiagram")
 
@@ -321,7 +322,7 @@ function M.open(conn_id, path, title, conn_key)
                 end
               end
               if #final_rels == 0 then
-                vim.notify("grannos: nothing to describe here", vim.log.levels.WARN)
+                notify.warn("nothing to describe here")
               elseif #final_rels == 1 then
                 require("grannos.ui.relationship").open_single(final_rels[1], final_colors[1], conn_id, final_paths[1])
               else
@@ -351,12 +352,12 @@ function M.open(conn_id, path, title, conn_key)
     client.request("explore.describe", { connection_id = conn_id, path = describe_path }, function(err, result)
       vim.schedule(function()
         if err then
-          vim.notify("grannos: " .. err, vim.log.levels.ERROR)
+          notify.error(err)
           return
         end
         local details = result and result.details
         if not details or details == vim.NIL then
-          vim.notify("grannos: nothing to describe here", vim.log.levels.WARN)
+          notify.warn("nothing to describe here")
           return
         end
         if is_columns_group then

@@ -2,6 +2,7 @@ local M = {}
 
 local queries     = require("grannos.queries")
 local connections = require("grannos.connections")
+local notify = require("grannos.notify")
 
 local PROMPT     = "Name> "
 local PROMPT_LEN = #PROMPT
@@ -195,7 +196,7 @@ local function pick_scope_no_conn(callback)
     table.sort(drivers, function(a, b) return a.driver_label < b.driver_label end)
 
     if #drivers == 0 then
-      vim.notify("grannos: no connections configured", vim.log.levels.WARN)
+      notify.warn("no connections configured")
       callback(nil)
       return
     end
@@ -290,11 +291,11 @@ function M.open(content, conn_key, ext)
     prompt_name(content, ext, name_hint, function(name)
       local ok = queries.save(scope_key, name, content, ext)
       if not ok then
-        vim.notify(("grannos: %q already exists in this scope — choose a different name"):format(name), vim.log.levels.WARN)
+        notify.warn(("%q already exists in this scope — choose a different name"):format(name))
         vim.schedule(function() do_save(scope_key, name) end)
         return
       end
-      vim.notify(('grannos: saved "%s" (%s)'):format(name, queries.scope_label(scope_key)), vim.log.levels.INFO)
+      notify.info(('saved "%s" (%s)'):format(name, queries.scope_label(scope_key)))
     end, function() end)
   end
 
@@ -305,11 +306,11 @@ function M.open(content, conn_key, ext)
         vim.schedule(function()
           local ok = queries.save(scope_key, name, content, ext)
           if not ok then
-            vim.notify(("grannos: %q already exists in this scope — choose a different name"):format(name), vim.log.levels.WARN)
+            notify.warn(("%q already exists in this scope — choose a different name"):format(name))
             vim.schedule(function() do_save(scope_key, name) end)
             return
           end
-          vim.notify(('grannos: saved "%s" (%s)'):format(name, queries.scope_label(scope_key)), vim.log.levels.INFO)
+          notify.info(('saved "%s" (%s)'):format(name, queries.scope_label(scope_key)))
         end)
       end)
     end)

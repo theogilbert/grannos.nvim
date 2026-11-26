@@ -13,6 +13,7 @@ local M = {}
 
 local hl     = require("grannos.hl")
 local Buffer = require("grannos.buffer")
+local notify = require("grannos.notify")
 
 local NS = vim.api.nvim_create_namespace("GrannosConnForm")
 
@@ -572,7 +573,7 @@ end
 local function submit()
   for _, field in ipairs(f.fields) do
     if field.is_valid and not field.is_valid() then
-      vim.notify("grannos: fill in all required fields", vim.log.levels.WARN)
+      notify.warn("fill in all required fields")
       return
     end
   end

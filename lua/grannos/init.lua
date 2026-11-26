@@ -20,6 +20,7 @@ local query_params      = require("grannos.query_params")
 local builtins          = require("grannos.builtins")
 local symbol_busy       = require("grannos.ui.symbol_busy")
 local statement_hl      = require("grannos.ui.statement_hl")
+local notify = require("grannos.notify")
 
 local FLASH_NS = vim.api.nvim_create_namespace("GrannosFlash")
 
@@ -251,7 +252,7 @@ local function start_backend()
   client.set_ok_handler(function(conn_id) set_idle_closed(conn_id, false) end)
   local ok, err = pcall(client.start, config.options.server_cmd)
   if not ok then
-    vim.notify("grannos: " .. tostring(err), vim.log.levels.ERROR)
+    notify.error(tostring(err))
     return false
   end
   return true
@@ -289,7 +290,7 @@ function M.attach(name)
       if not params then
         resolved_key, params, err = connections.find(caps.server or "", name)
         if not resolved_key then
-          vim.notify(("grannos: connection %q %s"):format(name, err), vim.log.levels.ERROR)
+          notify.error(("connection %q %s"):format(name, err))
           return
         end
       end
@@ -374,9 +375,8 @@ function M.auto_attach(bufnr)
   M.ensure_backend_with_caps(function(caps)
     local key, params, err = connections.find(caps.server or "", name)
     if not key then
-      vim.notify(("grannos: connection %q (named in %s) %s")
-        :format(name, vim.fn.fnamemodify(vim.api.nvim_buf_get_name(bufnr), ":~:."), err),
-        vim.log.levels.WARN)
+      notify.warn(("connection %q (named in %s) %s")
+        :format(name, vim.fn.fnamemodify(vim.api.nvim_buf_get_name(bufnr), ":~:."), err))
       return
     end
     if state.conns[key] then return assign(key, { bufnr }) end
@@ -430,8 +430,8 @@ local function restore_session_params(name, conn_id, driver, on_done)
   if next(values) == nil then return on_done() end
   client.set_session(conn_id, values, function(err)
     if err then
-      vim.notify(("grannos: could not restore session settings for %q — %s")
-        :format(connections.conn_display_name(name), err), vim.log.levels.WARN)
+      notify.warn(("could not restore session settings for %q — %s")
+        :format(connections.conn_display_name(name), err))
     end
     on_done()
   end)
@@ -476,13 +476,13 @@ function M._send_connect(name, params, after_connect, on_error)
   client.request("connect", server_params, function(err, result)
     connections_panel.clear_conn_loading(name)
     if err then
-      vim.notify(("grannos: %q failed — %s"):format(display, err), vim.log.levels.ERROR)
+      notify.error(("%q failed — %s"):format(display, err))
       connections_panel.set_conn_error(name, err)
       if on_error then on_error() end
       return
     end
     state.conns[name] = { conn_id = result.connection_id, driver = driver, key = name, driver_label = driver_label }
-    vim.notify(("grannos: connected to %q (%s)"):format(display, driver_label), vim.log.levels.INFO)
+    notify.info(("connected to %q (%s)"):format(display, driver_label))
     connections_panel.refresh()
     restore_session_params(name, result.connection_id, driver, function() refresh_session_values(name) end)
     if after_connect then after_connect(name) end
@@ -494,7 +494,7 @@ end
 function M.disconnect(name)
   local key = name ~= "" and name or state.buf_conns[vim.api.nvim_get_current_buf()]
   if not key then
-    vim.notify("grannos: no active connection", vim.log.levels.WARN)
+    notify.warn("no active connection")
     return
   end
   local conn = state.conns[key]
@@ -509,12 +509,12 @@ function M.disconnect(name)
     end
   end
   if not conn then
-    vim.notify(("grannos: not connected to %q"):format(name), vim.log.levels.ERROR)
+    notify.error(("not connected to %q"):format(name))
     return
   end
   client.request("disconnect", { connection_id = conn.conn_id }, function(err, _)
     if err then
-      vim.notify("grannos: " .. err, vim.log.levels.ERROR)
+      notify.error(err)
       return
     end
     require("grannos.completion").invalidate(conn.conn_id)
@@ -523,7 +523,7 @@ function M.disconnect(name)
     for bufnr, conn_name in pairs(state.buf_conns) do
       if conn_name == key then set_buf_conn(bufnr, nil) end
     end
-    vim.notify(("grannos: disconnected from %q"):format(connections.conn_display_name(key)), vim.log.levels.INFO)
+    notify.info(("disconnected from %q"):format(connections.conn_display_name(key)))
     connections_panel.refresh()
   end)
 end
@@ -576,15 +576,15 @@ end
 --- @param first_line integer  0-indexed first line of `sql` in `bufnr`
 local function execute_sql(sql, bufnr, first_line)
   if not sql or sql == "" then
-    vim.notify("grannos: no SQL to execute", vim.log.levels.WARN)
+    notify.warn("no SQL to execute")
     return
   end
   local conn = conn_for_buf(bufnr)
   if not conn then
     if next(state.conns) == nil then
-      vim.notify("grannos: no active connection — use :DbConnections to connect", vim.log.levels.WARN)
+      notify.warn("no active connection — use :DbConnections to connect")
     else
-      vim.notify("grannos: no active connection — run :DbAttach first", vim.log.levels.WARN)
+      notify.warn("no active connection — run :DbAttach first")
     end
     return
   end
@@ -614,14 +614,14 @@ function M.execute()
 
     local sql = selection.get_selection()
     if not sql or sql == "" then
-      vim.notify("grannos: empty selection", vim.log.levels.WARN)
+      notify.warn("empty selection")
       return
     end
     execute_sql(sql, bufnr, sr)
   else
     local target = execution_target(bufnr)
     if not target then
-      vim.notify("grannos: current line is empty", vim.log.levels.WARN)
+      notify.warn("current line is empty")
       return
     end
     flash_range(bufnr, target.start_row, target.start_col, target.end_row, target.end_col)
@@ -648,7 +648,7 @@ end
 function M.open_current_driver_help(opts)
   local conn = conn_for_buf(vim.api.nvim_get_current_buf())
   if not conn then
-    vim.notify("grannos: no connection associated with this buffer", vim.log.levels.WARN)
+    notify.warn("no connection associated with this buffer")
     return
   end
   M.open_driver_help(conn.driver, opts)
@@ -662,7 +662,7 @@ function M.open_driver_help(driver, opts)
   if not start_backend() then return end
   client.request("driver.help", { driver = driver }, function(err, result)
     if err then
-      vim.notify("grannos: " .. err, vim.log.levels.ERROR)
+      notify.error(err)
       return
     end
     local buf = vim.api.nvim_create_buf(false, true)
@@ -702,7 +702,7 @@ end
 function M.open_explorer_for(name)
   local conn = state.conns[name]
   if not conn then
-    vim.notify(("grannos: not connected to %q — press <CR> to connect first"):format(connections.conn_display_name(name)), vim.log.levels.ERROR)
+    notify.error(("not connected to %q — press <CR> to connect first"):format(connections.conn_display_name(name)))
     return
   end
   explorer.open(conn.conn_id, connections.conn_display_name(name), conn.driver, name, conn.driver_label)
@@ -731,18 +731,18 @@ end
 function M.open_session_settings_for(key)
   local conn = state.conns[key]
   if not conn then
-    vim.notify(("grannos: not connected to %q — press <CR> to connect first"):format(connections.conn_display_name(key)), vim.log.levels.ERROR)
+    notify.error(("not connected to %q — press <CR> to connect first"):format(connections.conn_display_name(key)))
     return
   end
   client.get_session(conn.conn_id, function(err, current)
     if err then
-      vim.notify(("grannos: %s has no session settings"):format(conn.driver_label or conn.driver), vim.log.levels.WARN)
+      notify.warn(("%s has no session settings"):format(conn.driver_label or conn.driver))
       return
     end
     local caps   = client.capabilities() or { drivers = {} }
     local fields = connections.session_fields(caps, conn.driver, current)
     if #fields == 0 then
-      vim.notify(("grannos: %s has no session settings"):format(conn.driver_label or conn.driver), vim.log.levels.WARN)
+      notify.warn(("%s has no session settings"):format(conn.driver_label or conn.driver))
       return
     end
     require("grannos.ui.conn_form").open({
@@ -770,7 +770,7 @@ end
 function M.open_session_settings()
   local key = current_conn_key()
   if not key then
-    vim.notify("grannos: no active connection — run :DbAttach first", vim.log.levels.WARN)
+    notify.warn("no active connection — run :DbAttach first")
     return
   end
   M.open_session_settings_for(key)
@@ -781,7 +781,7 @@ function M.open_explorer()
   local key = state.buf_conns[vim.api.nvim_get_current_buf()]
   local conn = key and state.conns[key]
   if not conn then
-    vim.notify("grannos: no active connection — run :DbAttach first", vim.log.levels.WARN)
+    notify.warn("no active connection — run :DbAttach first")
     return
   end
   explorer.open(conn.conn_id, connections.conn_display_name(key), conn.driver, key, conn.driver_label)
@@ -819,14 +819,13 @@ on_backend_exit = function(_code)
   local had_conns = next(state.conns) ~= nil
   clear_session_state()
   if not expected_exit and had_conns then
-    vim.notify("grannos: open connections were closed with the backend — reconnect to continue",
-      vim.log.levels.WARN)
+    notify.warn("open connections were closed with the backend — reconnect to continue")
   end
   expected_exit = false
   if pending_restart then
     pending_restart = false
     if start_backend() then
-      vim.notify("grannos: backend restarted", vim.log.levels.INFO)
+      notify.info("backend restarted")
     end
   end
 end
@@ -834,7 +833,7 @@ end
 --- Stop the backend process and notify the user.
 function M.stop()
   teardown()
-  vim.notify("grannos: backend stopped", vim.log.levels.INFO)
+  notify.info("backend stopped")
 end
 
 --- Restart the backend process (teardown then start).
@@ -847,7 +846,7 @@ function M.restart()
     -- process is spawned from there.
     pending_restart = true
   elseif start_backend() then
-    vim.notify("grannos: backend restarted", vim.log.levels.INFO)
+    notify.info("backend restarted")
   end
 end
 
@@ -867,13 +866,13 @@ function M.save_query()
   if selection.is_in_visual_mode() then
     content = selection.get_selection()
     if not content or content == "" then
-      vim.notify("grannos: empty selection", vim.log.levels.WARN)
+      notify.warn("empty selection")
       return
     end
   else
     content = vim.api.nvim_get_current_line()
     if vim.trim(content) == "" then
-      vim.notify("grannos: current line is empty", vim.log.levels.WARN)
+      notify.warn("current line is empty")
       return
     end
   end
@@ -888,7 +887,7 @@ function M.save_query_range(line1, line2)
   local lines   = vim.api.nvim_buf_get_lines(0, line1 - 1, line2, false)
   local content = table.concat(lines, "\n")
   if vim.trim(content) == "" then
-    vim.notify("grannos: empty selection", vim.log.levels.WARN)
+    notify.warn("empty selection")
     return
   end
   open_save_query(content, bufnr)
@@ -910,12 +909,12 @@ local function describe_symbol(conn_key, path, anchor)
     vim.schedule(function()
       symbol_busy.stop(busy)
       if err then
-        vim.notify("grannos: " .. err, vim.log.levels.ERROR)
+        notify.error(err)
         return
       end
       local details = result and result.details
       if not details or details == vim.NIL then
-        vim.notify("grannos: nothing to describe here", vim.log.levels.WARN)
+        notify.warn("nothing to describe here")
         return
       end
       if details.type == "field" then
@@ -984,14 +983,13 @@ local function resolve_symbol(conn_key, query, on_path, pick, anchor)
     vim.schedule(function()
       symbol_busy.stop(busy)
       if err then
-        vim.notify("grannos: " .. err, vim.log.levels.ERROR)
+        notify.error(err)
         return
       end
       local paths = result and result.paths or {}
       if #paths == 0 then
-        vim.notify(
-          ('grannos: no information found for "%s"'):format(query.name),
-          vim.log.levels.INFO)
+        notify.info(
+          ('no information found for "%s"'):format(query.name))
       elseif #paths > 1 then
         (pick or pick_candidate_preview)(conn_key, paths, query.name, on_path)
       else
@@ -1039,7 +1037,7 @@ function M.describe_symbol_at_cursor()
 
   local symbol = symbols.at_cursor(bufnr)
   if not symbol then
-    vim.notify("grannos: no symbol under the cursor", vim.log.levels.INFO)
+    notify.info("no symbol under the cursor")
     return
   end
   local anchor = { bufnr = bufnr, row = vim.api.nvim_win_get_cursor(0)[1] - 1 }
@@ -1059,7 +1057,7 @@ function M.goto_symbol_at_cursor()
 
   local symbol = symbols.at_cursor(bufnr)
   if not symbol then
-    vim.notify("grannos: no symbol under the cursor", vim.log.levels.INFO)
+    notify.info("no symbol under the cursor")
     return
   end
   resolve_symbol(conn_key, symbol, function(path)
@@ -1082,7 +1080,7 @@ function M.show_query_info()
   local line  = stmt and stmt.start_row or (vim.api.nvim_win_get_cursor(0)[1] - 1)
   local entry = log.find_at(conn_key, bufnr, line)
   if not entry then
-    vim.notify("grannos: no executed query at cursor", vim.log.levels.INFO)
+    notify.info("no executed query at cursor")
     return
   end
 
@@ -1157,12 +1155,12 @@ function M.cancel_query()
   local line       = vim.api.nvim_win_get_cursor(0)[1] - 1  -- 0-indexed
   local request_id = gutter.find_request_covering_line(bufnr, line)
   if not request_id then
-    vim.notify("grannos: no running query covers the cursor", vim.log.levels.WARN)
+    notify.warn("no running query covers the cursor")
     return
   end
   client.cancel(request_id, function(err, _)
     if err then
-      vim.notify("grannos: cancel failed — " .. err, vim.log.levels.ERROR)
+      notify.error("cancel failed — " .. err)
     end
   end)
 end
@@ -1179,7 +1177,7 @@ function M.ensure_connected(conn_key, callback)
   end
   local params = connections.get(conn_key)
   if not params then
-    vim.notify(("grannos: connection %q not found"):format(conn_key), vim.log.levels.ERROR)
+    notify.error(("connection %q not found"):format(conn_key))
     return
   end
   M.ensure_backend_with_caps(function(caps)
@@ -1198,7 +1196,7 @@ function M.load_query(conn_key)
     conn_key = state.buf_conns[vim.api.nvim_get_current_buf()]
   end
   if not conn_key then
-    vim.notify("grannos: no connection associated with current buffer", vim.log.levels.WARN)
+    notify.warn("no connection associated with current buffer")
     return
   end
   require("grannos.ui.query_picker").open(conn_key)
@@ -1209,7 +1207,7 @@ end
 function M.query_log(conn_key)
   conn_key = conn_key or current_conn_key()
   if not conn_key then
-    vim.notify("grannos: no connection associated with current buffer", vim.log.levels.WARN)
+    notify.warn("no connection associated with current buffer")
     return
   end
   require("grannos.ui.query_log").open(conn_key, state.conns[conn_key])

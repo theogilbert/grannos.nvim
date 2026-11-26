@@ -3,6 +3,7 @@
 local M = {}
 
 local pane = require("grannos.ui.detail_pane")
+local notify = require("grannos.notify")
 local ICON = "󰌷 "
 local ARROW = "  →  "
 local EDGE_LINE = string.rep("━", 40)
@@ -111,7 +112,7 @@ end
 ---                                  columns/indices, they don't share a common group)
 function M.open(rels, colors, conn_id, paths)
   if #rels == 0 then
-    vim.notify("grannos: no relationships found", vim.log.levels.WARN)
+    notify.warn("no relationships found")
     return
   end
   local items = {}

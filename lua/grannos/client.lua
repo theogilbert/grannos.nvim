@@ -5,6 +5,7 @@
 -- Request  fields: {id, method, params}
 -- Response fields: {id, result, error}
 local M = {}
+local notify = require("grannos.notify")
 
 local state = {
   job_id       = nil,
@@ -228,10 +229,9 @@ function M.start(cmd)
       if code == 127 then
         -- The shell could not find the command. The pre-flight check in start()
         -- catches this for a plain command; a shell expression reaches here.
-        vim.notify(("grannos: %q could not be run — is the backend installed? See :checkhealth grannos"):format(cmd),
-          vim.log.levels.ERROR)
+        notify.error(("%q could not be run — is the backend installed? See :checkhealth grannos"):format(cmd))
       elseif code ~= 0 then
-        vim.notify(("grannos: backend exited with code %d"):format(code), vim.log.levels.ERROR)
+        notify.error(("backend exited with code %d"):format(code))
       end
       if state.exit_handler then state.exit_handler(code) end
     end,

@@ -28,6 +28,7 @@
 -- Everything after the placeholder (and an optional colon) describes it; a
 -- trailing `= a | b | c` lists the values its prompt offers in a dropdown.
 local M = {}
+local notify = require("grannos.notify")
 
 --- The bind marker each SQL driver's DB-API module expects, given the
 --- 1-indexed position of the bind. Drivers absent here take no parameters.
@@ -592,7 +593,7 @@ function M.prompt(conn_key, params, on_submit, decls)
     title        = "Query Parameters",
     fields       = fields,
     submit_label = "run",
-    on_cancel    = function() vim.notify("grannos: execution aborted", vim.log.levels.WARN) end,
+    on_cancel    = function() notify.warn("execution aborted") end,
     on_submit    = function(values, done)
       last_values[conn_key] = vim.deepcopy(values)
       done(nil)

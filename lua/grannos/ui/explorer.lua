@@ -11,6 +11,7 @@ local pane           = require("grannos.ui.detail_pane")
 local results        = require("grannos.ui.results")
 local window         = require("grannos.ui.window")
 local Spinner        = require("grannos.ui.spinner")
+local notify = require("grannos.notify")
 
 local BUFNAME = "grannos://explorer"
 
@@ -331,7 +332,7 @@ local render_describe, calculate_win_size, present_describe_float  -- forward de
 --- @param path    string[]|nil   leaf path `details` was described at
 local function open_describe_float(details, node, conn_id, path)
   if not details or details == vim.NIL then
-    vim.notify("grannos: nothing to describe for this node", vim.log.levels.WARN)
+    notify.warn("nothing to describe for this node")
     return
   end
   local lines, hl_rules, win_title, col_rows = render_describe(details, node)
@@ -360,7 +361,7 @@ local function open_describe_float(details, node, conn_id, path)
           if not vim.api.nvim_win_is_valid(handle.win) then return end
           if err then
             pcall(vim.api.nvim_win_set_config, handle.win, { title = base_title })
-            vim.notify("grannos: " .. err, vim.log.levels.ERROR)
+            notify.error(err)
             return
           end
           local new_lines, new_hls, new_title, new_col_rows = render_describe(new_details, node)
@@ -716,7 +717,7 @@ local function on_describe(st)
     st.spinner:stop()
     if err then
       vim.schedule(function()
-        vim.notify("grannos: " .. err, vim.log.levels.ERROR)
+        notify.error(err)
         render(st)
       end)
       return
@@ -880,12 +881,12 @@ local function on_open_in_buffer(st)
   local line = vim.api.nvim_win_get_cursor(0)[1]
   local node = node_at_line(st, line)
   if not node or not DOWNLOADABLE_TYPES[node.type] then return end
-  vim.notify(("grannos: downloading %q…"):format(node.name), vim.log.levels.INFO)
+  notify.info(("downloading %q…"):format(node.name))
   client.request("explore.download", { connection_id = st.conn_id, path = node.path },
     function(err, result)
       vim.schedule(function()
         if err then
-          vim.notify("grannos: " .. err, vim.log.levels.ERROR)
+          notify.error(err)
           return
         end
         content_buffer.open(result.content_base64, result.filename, result.content_type)
@@ -906,16 +907,16 @@ local function on_save_to_disk(st)
     function(path)
       if not path or path == "" then return end
       local abs_path = vim.fn.fnamemodify(path, ":p")
-      vim.notify(("grannos: saving %q…"):format(abs_path), vim.log.levels.INFO)
+      notify.info(("saving %q…"):format(abs_path))
       client.request("explore.download",
         { connection_id = st.conn_id, path = node.path, dest_path = abs_path },
         function(err, result)
           vim.schedule(function()
             if err then
-              vim.notify("grannos: " .. err, vim.log.levels.ERROR)
+              notify.error(err)
               return
             end
-            vim.notify(("grannos: saved %d bytes to %q"):format(result.size, result.written_to), vim.log.levels.INFO)
+            notify.info(("saved %d bytes to %q"):format(result.size, result.written_to))
           end)
         end)
     end)
@@ -1208,8 +1209,7 @@ function M.reveal(path)
   local function descend(depth)
     local node = node_at_path(st, vim.list_slice(path, 1, depth))
     if not node then
-      vim.notify(('grannos: "%s" is not in the explorer tree'):format(table.concat(path, ".")),
-        vim.log.levels.WARN)
+      notify.warn(('"%s" is not in the explorer tree'):format(table.concat(path, ".")))
       return
     end
     if depth == #path then

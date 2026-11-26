@@ -2,6 +2,7 @@
 -- Shared by the explorer (S3 objects, etc.) and — later — the results pane's
 -- LOB-cell download flow.
 local M = {}
+local notify = require("grannos.notify")
 
 --- Filetype fallbacks for common MIME types, used when `filename` has no
 --- extension `vim.filetype.match` can key off (e.g. a bare S3 object key).
@@ -32,14 +33,13 @@ local CONTENT_TYPE_FT = {
 function M.open(content_base64, filename, content_type)
   local ok, content = pcall(vim.base64.decode, content_base64)
   if not ok then
-    vim.notify("grannos: failed to decode downloaded content", vim.log.levels.ERROR)
+    notify.error("failed to decode downloaded content")
     return
   end
   if content:find("\0", 1, true) then
-    vim.notify(
-      "grannos: content looks binary — can't display it safely in a buffer. "
-        .. "Use the query language's `cp` to download it to disk instead.",
-      vim.log.levels.WARN
+    notify.warn(
+      "content looks binary — can't display it safely in a buffer. "
+        .. "Use the query language's `cp` to download it to disk instead."
     )
     return
   end

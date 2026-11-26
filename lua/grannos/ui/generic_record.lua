@@ -8,6 +8,7 @@ local M = {}
 local pane      = require("grannos.ui.detail_pane")
 local table_fmt = require("grannos.table")
 local hl        = require("grannos.hl")
+local notify = require("grannos.notify")
 local ICON      = "󰋼 "
 
 --- @param v any
@@ -196,7 +197,7 @@ end
 function M.open(details, title, conn_id, group_path)
   local records = type(details) == "table" and details or {}
   if #records == 0 then
-    vim.notify("grannos: nothing to describe for this node", vim.log.levels.WARN)
+    notify.warn("nothing to describe for this node")
     return
   end
 
@@ -261,13 +262,13 @@ function M.open(details, title, conn_id, group_path)
           if not vim.api.nvim_win_is_valid(win) then return end
           if err then
             pcall(vim.api.nvim_win_set_config, win, { title = base_title })
-            vim.notify("grannos: " .. err, vim.log.levels.ERROR)
+            notify.error(err)
             return
           end
           local new_records = type(new_details) == "table" and new_details or {}
           if #new_records == 0 then
             pcall(vim.api.nvim_win_set_config, win, { title = base_title })
-            vim.notify("grannos: no records found", vim.log.levels.WARN)
+            notify.warn("no records found")
             return
           end
           records = new_records

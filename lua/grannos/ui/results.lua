@@ -31,6 +31,7 @@ local messages       = require("grannos.messages")
 local histogram      = require("grannos.ui.histogram")
 local row_detail     = require("grannos.ui.row_detail")
 local window         = require("grannos.ui.window")
+local notify = require("grannos.notify")
 
 local M = {}
 
@@ -581,21 +582,21 @@ local stop_auto_refresh  -- forward declaration; defined below rerun_query
 --- @return boolean  false when the query cannot be re-run at all
 local function rerun_query(buf_state, auto)
   if is_busy(buf_state) then
-    if not auto then vim.notify("grannos: query still running", vim.log.levels.INFO) end
+    if not auto then notify.info("query still running") end
     return true
   end
   if not buf_state.query then
-    vim.notify("grannos: no query to re-run", vim.log.levels.INFO)
+    notify.info("no query to re-run")
     return false
   end
   local conn = buf_state.conn_key and require("grannos").get_conn(buf_state.conn_key)
   if not conn then
-    vim.notify("grannos: connection is no longer open", vim.log.levels.WARN)
+    notify.warn("connection is no longer open")
     return false
   end
   local src_bufnr = buf_state.src_bufnr
   if src_bufnr and not vim.api.nvim_buf_is_valid(src_bufnr) then
-    vim.notify("grannos: source buffer is gone", vim.log.levels.WARN)
+    notify.warn("source buffer is gone")
     return false
   end
   local first_line = nil
@@ -612,8 +613,7 @@ local function rerun_query(buf_state, auto)
     values     = auto and buf_state.query_values or nil,
     on_refused = auto and function()
       stop_auto_refresh(buf_state)
-      vim.notify("grannos: auto-refresh stopped — the query writes and writes need confirming",
-        vim.log.levels.WARN)
+      notify.warn("auto-refresh stopped — the query writes and writes need confirming")
     end or nil,
   })
   return true
@@ -687,7 +687,7 @@ local function auto_refresh_tick(buf_state)
   if is_busy(buf_state) then return end
   if not rerun_query(buf_state, true) then
     stop_auto_refresh(buf_state)
-    vim.notify("grannos: auto-refresh stopped", vim.log.levels.WARN)
+    notify.warn("auto-refresh stopped")
   end
 end
 
@@ -730,7 +730,7 @@ local function pick_auto_refresh(buf_state)
     if not item then return end
     if not item.custom then
       if item.ms and not buf_state.query then
-        vim.notify("grannos: no query to refresh", vim.log.levels.INFO)
+        notify.info("no query to refresh")
         return
       end
       set_auto_refresh(buf_state, item.ms)
@@ -740,11 +740,11 @@ local function pick_auto_refresh(buf_state)
       if not text or text == "" then return end
       local ms = M.parse_interval(text)
       if not ms then
-        vim.notify("grannos: not an interval: " .. text, vim.log.levels.WARN)
+        notify.warn("not an interval: " .. text)
         return
       end
       if not buf_state.query then
-        vim.notify("grannos: no query to refresh", vim.log.levels.INFO)
+        notify.info("no query to refresh")
         return
       end
       set_auto_refresh(buf_state, ms)
@@ -796,7 +796,7 @@ local function unpin_pane(buf_state)
   buf_state.slot_key, buf_state.slot_name = nil, nil
   local win = win_showing(buf_state.buffer.buf_id)
   if win then state.win_ids[buf_state.host or resolve_host(nil)] = win end
-  vim.notify("grannos: unpinned — the next result shows here", vim.log.levels.INFO)
+  notify.info("unpinned — the next result shows here")
 end
 
 --- Pin the pane: move its buf_state out of the (source buffer, connection)
@@ -845,7 +845,7 @@ export_results = function(buf_state)
     format_item = function(f) return export.LABELS[f] end,
   }, function(format)
     if not format then return end
-    vim.notify("grannos: exporting…", vim.log.levels.INFO)
+    notify.info("exporting…")
     export.run_async(function()
       local indices = visible_col_indices(buf_state)
       local rows = {}
@@ -911,7 +911,7 @@ local function lob_ref_at_cursor(buf_state)
   local cell = lob_cell_at_cursor(buf_state)
   if not cell then return nil end
   if not cell.ref then
-    vim.notify("grannos: this value can't be downloaded again — re-run the query and use it before the connection moves on", vim.log.levels.WARN)
+    notify.warn("this value can't be downloaded again — re-run the query and use it before the connection moves on")
     return nil
   end
   return cell.ref
@@ -925,11 +925,11 @@ local function on_open_lob_in_buffer(buf_state)
   if not ref then return end
   local conn = buf_state.conn_key and require("grannos").get_conn(buf_state.conn_key)
   if not conn then return end
-  vim.notify("grannos: downloading…", vim.log.levels.INFO)
+  notify.info("downloading…")
   client.request("explore.download", { connection_id = conn.conn_id, ref = ref }, function(err, result)
     vim.schedule(function()
       if err then
-        vim.notify("grannos: " .. err, vim.log.levels.ERROR)
+        notify.error(err)
         return
       end
       content_buffer.open(result.content_base64, result.filename, result.content_type)
@@ -949,15 +949,15 @@ local function on_save_lob_to_disk(buf_state)
   vim.ui.input({ prompt = "Save to: ", default = vim.fn.getcwd() .. "/", completion = "file" }, function(path)
     if not path or path == "" then return end
     local abs_path = vim.fn.fnamemodify(path, ":p")
-    vim.notify(("grannos: saving to %q…"):format(abs_path), vim.log.levels.INFO)
+    notify.info(("saving to %q…"):format(abs_path))
     client.request("explore.download", { connection_id = conn.conn_id, ref = ref, dest_path = abs_path },
       function(err, result)
         vim.schedule(function()
           if err then
-            vim.notify("grannos: " .. err, vim.log.levels.ERROR)
+            notify.error(err)
             return
           end
-          vim.notify(("grannos: saved %d bytes to %q"):format(result.size, result.written_to), vim.log.levels.INFO)
+          notify.info(("saved %d bytes to %q"):format(result.size, result.written_to))
         end)
       end)
   end)
@@ -1155,7 +1155,7 @@ local function get_or_create_buf_state(buf_key, buf_title)
     { desc = "Pin: keep this pane, show the next result beside it (again: unpin)", silent = true })
   buf:set_keymap("n", "p", function()
     if not buf_state.conn_key then
-      vim.notify("grannos: no connection for these results", vim.log.levels.WARN)
+      notify.warn("no connection for these results")
       return
     end
     require("grannos").open_session_settings_for(buf_state.conn_key)
@@ -1370,7 +1370,7 @@ end
 --- @param buf_state table
 toggle_histogram = function(buf_state)
   if buf_state.segments and #buf_state.segments > 0 then
-    vim.notify("grannos: the histogram is not available for a multi-statement batch", vim.log.levels.INFO)
+    notify.info("the histogram is not available for a multi-statement batch")
     return
   end
   if not buf_state.raw_rows then return end

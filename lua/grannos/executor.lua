@@ -9,6 +9,7 @@ local log         = require("grannos.log")
 local ts_queries  = require("grannos.ts_queries")
 local devtools    = require("grannos.devtools")
 local query_params = require("grannos.query_params")
+local notify = require("grannos.notify")
 
 -- Past-tense verb shown for DML statements, keyed by leading keyword.
 local DML_VERBS = {
@@ -209,7 +210,7 @@ local function check_confirm_writes(conn, bufnr, first_line, query, callback, un
   local choices = { "Abort", "Execute", "Always allow writes" }
   vim.ui.select(choices, { prompt = "Write operation detected:" }, function(choice)
     if not choice or choice == "Abort" then
-      vim.notify("grannos: execution aborted", vim.log.levels.WARN)
+      notify.warn("execution aborted")
       callback(false)
     elseif choice == "Always allow writes" then
       connections.set_allow_writes(conn.key)
@@ -234,7 +235,7 @@ local function with_params(conn, query, bufnr, callback)
   if not dialect then callback(nil) return end
   local params, err = query_params.find(query, dialect)
   if not params then
-    vim.notify("grannos: " .. err, vim.log.levels.ERROR)
+    notify.error(err)
     return
   end
   if #params == 0 then callback(nil) return end

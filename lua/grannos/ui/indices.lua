@@ -5,6 +5,7 @@
 local M = {}
 
 local pane = require("grannos.ui.detail_pane")
+local notify = require("grannos.notify")
 local ICON = "󰒻 "
 
 --- @param v any
@@ -109,7 +110,7 @@ end
 function M.open(details, title, conn_id, group_path)
   local indices = type(details) == "table" and details or {}
   if #indices == 0 then
-    vim.notify("grannos: no indices found for this table", vim.log.levels.WARN)
+    notify.warn("no indices found for this table")
     return
   end
   pane.open_searchable_two_pane({
