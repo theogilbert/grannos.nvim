@@ -25,7 +25,6 @@ local state = {
   conn_errors   = {},   -- [key]     -> string
   conn_loading  = {},   -- [key]     -> Spinner
   panel_loading = nil,  -- Spinner while waiting for initial capabilities
-  hover_win     = nil,
 }
 
 --- Build the line/highlight/line_map arrays for a single server's data.
@@ -353,6 +352,10 @@ end
 
 local HIDDEN_CONN_FIELDS = { password = true, requires_password = true }
 
+-- The connection details / error float (common.hover): gone on the next move
+-- in the pane, entered by a second press so it can be scrolled.
+local conn_hover = require("common.hover").new()
+
 --- Open a non-focusable float displaying `lines` near the cursor.
 --- Closes automatically on `CursorMoved` or `BufLeave`.
 --- @param lines     string[]
@@ -360,52 +363,17 @@ local HIDDEN_CONN_FIELDS = { password = true, requires_password = true }
 --- @param border_hl string|nil  FloatBorder highlight group
 --- @param line_hl   string|nil  highlight group applied to every line
 local function open_hover_float(lines, title, border_hl, line_hl)
-  local max_w = 1
-  for _, l in ipairs(lines) do max_w = math.max(max_w, vim.fn.strdisplaywidth(l)) end
-  local win_w = math.min(max_w, vim.o.columns - 6)
-
-  local height = 0
-  for _, l in ipairs(lines) do
-    local w = vim.fn.strdisplaywidth(l)
-    height = height + (w == 0 and 1 or math.ceil(w / win_w))
-  end
-
-  local fbuf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_lines(fbuf, 0, -1, false, lines)
-  vim.bo[fbuf].modifiable = false
-  vim.bo[fbuf].bufhidden  = "wipe"
+  local marks = {}
   if line_hl then
-    for i = 0, #lines - 1 do
-      vim.api.nvim_buf_add_highlight(fbuf, -1, line_hl, i, 0, -1)
-    end
+    for i = 0, #lines - 1 do table.insert(marks, { i, 0, nil, line_hl }) end
   end
-
-  local fwin = vim.api.nvim_open_win(fbuf, false, {
-    relative  = "cursor",
-    row       = 1,
-    col       = 0,
-    width     = win_w,
-    height    = height,
-    style     = "minimal",
-    border    = "rounded",
-    title     = " " .. title .. " ",
-    title_pos = "center",
-    focusable = false,
-  })
-  if border_hl then
-    vim.api.nvim_set_option_value("winhl", "FloatBorder:" .. border_hl, { win = fwin })
-  end
-  vim.api.nvim_set_option_value("wrap", true, { win = fwin })
-
-  state.hover_win = fwin
-  vim.api.nvim_create_autocmd({ "CursorMoved", "BufLeave" }, {
-    group    = vim.api.nvim_create_augroup("GrannosHoverFloat", { clear = true }),
-    buffer   = state.buffer.buf_id,
-    once     = true,
-    callback = function()
-      pcall(vim.api.nvim_win_close, state.hover_win, true)
-      state.hover_win = nil
-    end,
+  conn_hover:open(lines, {
+    buf          = state.buffer.buf_id,
+    title        = " " .. title .. " ",
+    marks        = marks,
+    max_height   = vim.o.lines - 4,
+    winhighlight = border_hl and ("FloatBorder:" .. border_hl) or nil,
+    events       = { "CursorMoved", "BufLeave" },
   })
 end
 
@@ -449,22 +417,7 @@ local function on_hover()
   local entry = entry_at_cursor()
   if not entry or entry.type ~= "conn" then return end
 
-  if state.hover_win and vim.api.nvim_win_is_valid(state.hover_win) then
-    pcall(vim.api.nvim_del_augroup_by_name, "GrannosHoverFloat")
-    local fwin = state.hover_win
-    local fbuf = vim.api.nvim_win_get_buf(fwin)
-    local prev = vim.api.nvim_get_current_win()
-    vim.api.nvim_win_set_config(fwin, { focusable = true })
-    vim.api.nvim_set_current_win(fwin)
-    for _, k in ipairs({ "q", "<Esc>" }) do
-      vim.keymap.set("n", k, function()
-        pcall(vim.api.nvim_win_close, fwin, true)
-        state.hover_win = nil
-        if vim.api.nvim_win_is_valid(prev) then vim.api.nvim_set_current_win(prev) end
-      end, { buffer = fbuf, silent = true, nowait = true })
-    end
-    return
-  end
+  if conn_hover:enter() then return end
 
   local err_msg = state.conn_errors[entry.key]
   if err_msg then
